@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, Optional, Tuple
 
 import torch
@@ -16,10 +16,10 @@ from .policy import PolicyNet, PolicyConfig
 
 @dataclass
 class AgentConfig:
-    encoder: EncoderConfig = EncoderConfig()
-    world: WorldLatentConfig = WorldLatentConfig()
-    state: StateHeadConfig = StateHeadConfig()
-    policy: PolicyConfig = PolicyConfig()
+    encoder: EncoderConfig = field(default_factory=EncoderConfig)
+    world: WorldLatentConfig = field(default_factory=WorldLatentConfig)
+    state: StateHeadConfig = field(default_factory=StateHeadConfig)
+    policy: PolicyConfig = field(default_factory=PolicyConfig)
     device: str = "cpu"
 
 

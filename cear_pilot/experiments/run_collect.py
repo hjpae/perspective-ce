@@ -91,10 +91,13 @@ def build_agent_from_meta(
     meta: Dict[str, Any],
     device: str,
     zone_sigma_override: Optional[Tuple[float, float, float]] = None,
+    max_steps_override: Optional[int] = None,
 ) -> tuple[CEARAgent, ObsDecoder, NZoneGridEnv]:
     env_cfg = NZoneConfig(**meta["env_cfg"])
     if zone_sigma_override is not None:
         env_cfg.zone_sigma = tuple(float(v) for v in zone_sigma_override)
+    if max_steps_override is not None and max_steps_override > 0:
+        env_cfg.max_steps = int(max_steps_override)
     env = NZoneGridEnv(config=env_cfg)
 
     agent_cfg = AgentConfig(device=device)
@@ -183,6 +186,10 @@ def main():
     ap.add_argument("--log_policy_full", action="store_true",
                     help="If set, log logits_act_* and pi_act_* columns for every action.")
 
+    # Override env max_steps at replay time (training default is in ckpt meta)
+    ap.add_argument("--max_steps", type=int, default=-1,
+                    help="Override env max_steps (-1 = use ckpt's training value)")
+
     args = ap.parse_args()
 
     ckpt = torch.load(args.ckpt, map_location=args.device)
@@ -191,7 +198,12 @@ def main():
     sigma1 = _tuple3(args.zone_sigma)
     sigma2 = _tuple3(args.zone_sigma2)
 
-    agent, decoder, env = build_agent_from_meta(meta, device=args.device, zone_sigma_override=sigma1)
+    agent, decoder, env = build_agent_from_meta(
+        meta,
+        device=args.device,
+        zone_sigma_override=sigma1,
+        max_steps_override=(args.max_steps if args.max_steps > 0 else None),
+    )
     agent.load_state_dict(ckpt["agent_state"])
     decoder.load_state_dict(ckpt["decoder_state"])
     agent.to(args.device).eval()

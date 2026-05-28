@@ -1,4 +1,4 @@
-## --- this includes Dreamer-like policy optimization, involves "actor" unit --- 
+## --- this includes Dreamer-like policy optimization, involves "actor" unit ---
 
 # cear_pilot/training/train.py
 # -*- coding: utf-8 -*-
@@ -24,6 +24,7 @@ from cear_pilot.models.decoder import ObsDecoder, DecoderConfig
 
 import pandas as pd
 
+
 # ---------------------------
 # utils
 # ---------------------------
@@ -36,10 +37,6 @@ def onehot(indices: torch.Tensor, n: int) -> torch.Tensor:
 def make_proprio_from_last_action(last_action: int, n_actions: int, device: torch.device) -> torch.Tensor:
     a = torch.tensor([last_action], device=device)
     return onehot(a, n_actions)
-
-
-def timestamp_id() -> str:
-    return time.strftime("%Y%m%d_%H%M%S")
 
 
 def save_meta(run_dir: Path, meta: Dict) -> None:
@@ -109,12 +106,12 @@ def main():
     ap.add_argument("--height", type=int, default=9)
     ap.add_argument("--obs_dim", type=int, default=8)
     ap.add_argument("--max_steps", type=int, default=240)
-    
+
     ap.add_argument("--mirror_x", action="store_true")
     ap.add_argument("--mirror_actions", action="store_true")
 
     # ---------------------------
-    # MINIMAL TRAJ LOGGING (NEW)
+    # MINIMAL TRAJ LOGGING
     # ---------------------------
     ap.add_argument("--log_traj", action="store_true", help="Save per-step training trajectory to train_traj.parquet")
     ap.add_argument("--log_every", type=int, default=1, help="Log every N steps (1 = log all steps)")
@@ -237,10 +234,15 @@ def main():
     params = list(agent.parameters()) + list(decoder.parameters())
     opt = torch.optim.Adam(params, lr=args.lr)
 
-    run_dir = Path("outputs") / "runs" / timestamp_id()
-    run_dir.mkdir(parents=True, exist_ok=True)
+    # -----------------------------------------------------------------
+    # Save directly to seed-numbered directory.
+    # No timestamp directory.
+    # Example: outputs/runs/seed6/ckpt.pt
+    # -----------------------------------------------------------------
+    run_dir = Path("outputs") / "runs" / f"seed{args.seed}"
+    run_dir.mkdir(parents=True, exist_ok=False)
 
-    # ---- training schedule (no new argparse):
+    # ---- training schedule:
     # warmup: learn world model + g dynamics first, then turn on actor
     warmup_steps = max(2000, min(args.steps // 4, 20000))
 
@@ -249,7 +251,11 @@ def main():
         "steps": args.steps,
         "lr": args.lr,
         "device": args.device,
-        "loss_weights": {"w_smooth": args.w_smooth, "w_entropy": args.w_entropy, "w_actor": args.w_actor},
+        "loss_weights": {
+            "w_smooth": args.w_smooth,
+            "w_entropy": args.w_entropy,
+            "w_actor": args.w_actor,
+        },
         "actor_b": args.actor_b,
         "stopgrad_default": {
             "policy_state_detach": True,   # action policy uses s.detach()
@@ -279,7 +285,7 @@ def main():
     save_meta(run_dir, meta)
 
     # ---------------------------
-    # MINIMAL TRAJ LOGGING (NEW)
+    # MINIMAL TRAJ LOGGING
     # ---------------------------
     log_rows = []
     log_every = int(max(1, args.log_every))
@@ -321,7 +327,7 @@ def main():
 
     t0 = time.time()
     episode = 0
-    t_in_ep = 0  # (NEW) track step within episode
+    t_in_ep = 0
 
     try:
         for step in range(args.steps):
@@ -382,6 +388,7 @@ def main():
                 # normalized advantage (negative centered error)
                 adv = -(e_val - baseline)
                 adv = adv / (s + 1e-8)
+
                 # clip to avoid rare spikes exploding training
                 adv = float(np.clip(adv, -5.0, 5.0))
 
@@ -414,7 +421,7 @@ def main():
             obs = obs_next
             last_action = a_int
 
-            # ---------- MINIMAL TRAJ LOGGING (NEW)
+            # ---------- MINIMAL TRAJ LOGGING
             if args.log_traj and ((step % log_every) == 0):
                 # zone index usually in info; fallback robustly
                 z = info.get("zone", None)
@@ -521,7 +528,7 @@ def main():
                     f"H={float(entropy.item()):.3f} maxpi={float(maxpi_ema):.3f} KL={float(kl_ema):.6f} "
                     f"logits|.|={float(logits_norm_ema):.3f} "
                     f"e[min,max,std]={e_min:.3f},{e_max:.3f},{e_std:.3f} "
-                    f"zone={[round(x,2) for x in zone_prob]} act={[round(x,2) for x in act_prob]} "
+                    f"zone={[round(x, 2) for x in zone_prob]} act={[round(x, 2) for x in act_prob]} "
                     f"(ep={episode}, {dt:.1f}s)"
                 )
                 t0 = time.time()
@@ -531,14 +538,14 @@ def main():
             viewer.close()
 
     # ---------------------------
-    # SAVE TRAJ (NEW)
+    # SAVE TRAJ
     # ---------------------------
     if args.log_traj and len(log_rows) > 0:
         df = pd.DataFrame(log_rows)
-    
+
         out_parquet = run_dir / "train_traj.parquet"
         out_csv = run_dir / "train_traj.csv"
-    
+
         try:
             df.to_parquet(out_parquet, index=False)
             print(f"Saved training trajectory to: {out_parquet}")
