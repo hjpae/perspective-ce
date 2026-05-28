@@ -24,7 +24,7 @@ Clone the repository:
 
 ```bash
 git clone git@github.com:hjpae/perspective-ce.git
-cd perspective-ce
+cd perspective-cemergence
 git remote -v
 ```
 

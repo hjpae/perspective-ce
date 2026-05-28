@@ -7,7 +7,7 @@
 # Usage:
 #   bash collect_all_seeds.sh
 #
-# Expects ckpts at: runs - AAAI/seed{1..5}/ckpt.pt
+# Expects ckpts at: outputs/runs/seed{1..5}/ckpt.pt
 # Outputs to:       outputs/replay_seed{1..5}_{clean,p20}/traj.parquet
 # -----------------------------------------------------------------
 
@@ -23,7 +23,7 @@ echo "Batch replay collection: 5 seeds × {clean, p20}"
 echo "================================================================"
 
 for seed in 1 2 3 4 5; do
-    ckpt="runs - outputs/runs/seed${seed}/ckpt.pt"
+    ckpt="outputs/runs/seed${seed}/ckpt.pt"
     if [[ ! -f "$ckpt" ]]; then
         echo "[ERR ] missing ckpt: $ckpt — skipping seed $seed"
         continue
