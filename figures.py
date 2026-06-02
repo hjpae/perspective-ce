@@ -1,18 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-figures.py
------------
-All five paper figures, one file, Spyder-cell-friendly.
+figures.py (v2)
+---------------
+Five paper figures, revised:
 
-Run cells top-to-bottom (Ctrl+Enter in Spyder):
-  Cell [SETUP]   loads all CSVs once
-  Cell [FIG 1]   Architectural separation: Φ_r(g) vs Φ_r(z)
-  Cell [FIG 2]   Temporal origin: shuffled-g collapse
-  Cell [FIG 3]   Learning's two effects (magnitude + atom composition)
-  Cell [FIG 4]   Hysteresis curves: switch-aligned Φ_r(g)
-  Cell [FIG 5]   Atom-level regime sensitivity
+  Fig 1 (merged): (a) Φ_r(g) vs Φ_r(z) violins  +  (b) shuffle collapse
+  Fig 2: magnitude — Φ_r(g) untrained vs trained, violins (untrained as points)
+  Fig 3: atom-group decomposition (clean), bars
+  Fig 4: switch-aligned hysteresis (y ∈ [0.25, 3.0], no comment box)
+  Fig 5: atom-level regime sensitivity (single panel, trained vs untrained side-by-side per group)
 
-Outputs saved to figs/ as both .pdf (vector) and .png (preview).
+Run cells top-to-bottom in Spyder (Ctrl+Enter).
 """
 
 # %% [SETUP] -------------------------------------------------------------------
@@ -25,9 +23,8 @@ import pandas as pd
 
 warnings.filterwarnings("ignore")
 
-# ---- styling ----
-COLOR_TRAINED   = "#1f4e79"     # deep blue
-COLOR_UNTRAINED = "#d65f3e"     # red-orange
+COLOR_TRAINED   = "#1f4e79"
+COLOR_UNTRAINED = "#d65f3e"
 COLOR_NEUTRAL   = "#444444"
 COLOR_FAINT     = "#cccccc"
 
@@ -54,158 +51,152 @@ def save(fig, name):
     fig.savefig(FIGS / f"{name}.png")
     print(f"  saved → figs/{name}.{{pdf,png}}")
 
-# ---- load all CSVs once ----
 print("Loading CSVs...")
 dt_clean = pd.read_csv(DATA / "v2_decomp_trained.csv")
 du_clean = pd.read_csv(DATA / "v2_decomp_untrained.csv")
 prepost  = pd.read_csv(DATA / "v2_prepost.csv")
 shuffle  = pd.read_csv(DATA / "v2_shuffle.csv")
-hyst     = pd.read_csv(DATA / "hysteresis_binned.csv")
-atoms    = pd.read_csv(DATA / "atoms_decomp.csv")
-print(f"  trained clean: {len(dt_clean)}")
-print(f"  untrained clean: {len(du_clean)}")
-print(f"  prepost: {len(prepost)} ({prepost.group.value_counts().to_dict()})")
-print(f"  shuffle: {len(shuffle)}")
-print(f"  hyst binned: {len(hyst)}")
-print(f"  atoms: {len(atoms)} ({atoms.groupby(['group','condition']).size().to_dict()})")
+hyst     = pd.read_csv(DATA / "rq4_hysteresis_binned.csv")
+atoms    = pd.read_csv(DATA / "rq5_atoms_decomp.csv")
+print("  loaded.")
 
 
-# %% [FIG 1] Architectural separation: Φ_r(g) ≫ Φ_r(z) ------------------------
+# %% [FIG 1] Architectural separation + Temporal origin (merged) ---------------
 """
-Two panels:
-  (a) per-seed mean bar plot of Φ_r(z) and Φ_r(g)
-  (b) pooled violin / box of the two distributions
+Merged Fig 1:
+  (a) Φ_r(z) vs Φ_r(g) — pooled distributions (trained, clean).
+      Left side (Φ_r(z)) as scatter, right side (Φ_r(g)) as violin.
+  (b) Φ_r(g) original vs shuffled — same dual style (left scatter, right violin).
 """
 
-fig, axes = plt.subplots(1, 2, figsize=(8.5, 3.6),
-                         gridspec_kw={"width_ratios": [1.7, 1.0]})
+fig, axes = plt.subplots(1, 2, figsize=(8.5, 3.6))
 
-# --- (a) per-seed bars ---
+# === (a) z (scatter) vs g (violin) ===
 ax = axes[0]
-per_seed = dt_clean.groupby("seed").agg(z=("phi_r_z", "mean"),
-                                          g=("phi_r_g", "mean")).reset_index()
-seeds = per_seed["seed"].values
-x = np.arange(len(seeds))
-w = 0.4
-ax.bar(x - w/2, per_seed["z"], w, color=COLOR_FAINT,
-       label=r"$\Phi_r(z)$", edgecolor="white", linewidth=0.5)
-ax.bar(x + w/2, per_seed["g"], w, color=COLOR_TRAINED,
-       label=r"$\Phi_r(g)$", edgecolor="white", linewidth=0.5)
-ax.set_xticks(x)
-ax.set_xticklabels(seeds, fontsize=7)
-ax.set_xlabel("seed")
-ax.set_ylabel(r"$\Phi_r$")
-ax.set_title("(a) per-seed mean (trained, clean)")
-ax.legend(loc="upper left", frameon=False)
-ax.set_xlim(-0.7, len(seeds) - 0.3)
+z_vals = dt_clean["phi_r_z"].values
+g_vals = dt_clean["phi_r_g"].values
 
-# --- (b) pooled violins ---
-ax = axes[1]
-data = [dt_clean["phi_r_z"].values, dt_clean["phi_r_g"].values]
-parts = ax.violinplot(data, positions=[0, 1], widths=0.7,
-                       showmedians=True, showextrema=False)
-for i, pc in enumerate(parts["bodies"]):
-    pc.set_facecolor([COLOR_FAINT, COLOR_TRAINED][i])
-    pc.set_alpha(0.7)
-    pc.set_edgecolor("white")
-parts["cmedians"].set_color(COLOR_NEUTRAL)
-parts["cmedians"].set_linewidth(1.3)
+# left: z as scatter (jittered)
+rng = np.random.default_rng(0)
+jit_z = rng.normal(0, 0.06, size=len(z_vals))
+ax.scatter(0 + jit_z, z_vals, s=8, color=COLOR_NEUTRAL, alpha=0.35, zorder=2,
+           edgecolor="none")
+# mark mean
+ax.hlines(z_vals.mean(), -0.18, 0.18, colors=COLOR_NEUTRAL, lw=1.5, zorder=4)
+
+# right: g as violin
+v = ax.violinplot([g_vals], positions=[1], widths=0.7,
+                  showmedians=True, showextrema=False)
+v["bodies"][0].set_facecolor(COLOR_TRAINED)
+v["bodies"][0].set_alpha(0.7)
+v["bodies"][0].set_edgecolor("white")
+v["cmedians"].set_color(COLOR_NEUTRAL)
+v["cmedians"].set_linewidth(1.3)
+
 ax.set_xticks([0, 1])
 ax.set_xticklabels([r"$\Phi_r(z)$", r"$\Phi_r(g)$"])
 ax.set_ylabel(r"$\Phi_r$")
-ax.set_title(f"(b) pooled (n={len(dt_clean)})")
+ax.set_title("(a) architectural separation (trained, clean)")
+ax.set_xlim(-0.5, 1.5)
 
-# annotation
-ratio = dt_clean["phi_r_g"].mean() / max(dt_clean["phi_r_z"].mean(), 1e-6)
+ratio = g_vals.mean() / max(z_vals.mean(), 1e-6)
 ax.text(0.5, 0.96, f"ratio g/z = {ratio:.0f}×\np < 10⁻¹³⁰",
         transform=ax.transAxes, ha="center", va="top", fontsize=9,
         bbox=dict(boxstyle="round,pad=0.3", fc="white",
                   ec=COLOR_NEUTRAL, lw=0.7))
 
-plt.tight_layout()
-save(fig, "fig1_architectural_separation")
-plt.show()
-
-
-# %% [FIG 2] Temporal origin: shuffled-g collapse ------------------------------
-"""
-Side-by-side: Φ_r(g) original vs temporally shuffled.
-Bar with individual episodes overlaid as scatter.
-"""
-
-fig, ax = plt.subplots(figsize=(4.2, 3.6))
-
+# === (b) original vs shuffled — same dual style ===
+ax = axes[1]
 g_o = shuffle["phi_g_orig"].values
 g_s = shuffle["phi_g_shuf"].values
 
-# bars
-x = [0, 1]
-means = [g_o.mean(), g_s.mean()]
-sds = [g_o.std(), g_s.std()]
-ax.bar(x, means, color=[COLOR_TRAINED, COLOR_FAINT], width=0.55,
-       edgecolor="white", linewidth=1)
+# left: original as violin (it has structure to show)
+v = ax.violinplot([g_o], positions=[0], widths=0.7,
+                  showmedians=True, showextrema=False)
+v["bodies"][0].set_facecolor(COLOR_TRAINED)
+v["bodies"][0].set_alpha(0.7)
+v["bodies"][0].set_edgecolor("white")
+v["cmedians"].set_color(COLOR_NEUTRAL)
+v["cmedians"].set_linewidth(1.3)
 
-# scatter overlay (jittered)
-rng = np.random.default_rng(0)
-for xi, vals in zip(x, [g_o, g_s]):
-    jit = rng.normal(0, 0.05, size=len(vals))
-    ax.scatter(xi + jit, vals, s=8, color=COLOR_NEUTRAL, alpha=0.25, zorder=3)
+# right: shuffled as scatter (collapsed to near-zero)
+jit_s = rng.normal(0, 0.06, size=len(g_s))
+ax.scatter(1 + jit_s, g_s, s=8, color=COLOR_NEUTRAL, alpha=0.35, zorder=2,
+           edgecolor="none")
+ax.hlines(g_s.mean(), 1 - 0.18, 1 + 0.18, colors=COLOR_NEUTRAL, lw=1.5, zorder=4)
 
-ax.set_xticks(x)
+ax.set_xticks([0, 1])
 ax.set_xticklabels(["original", "shuffled\n(temporal)"])
 ax.set_ylabel(r"$\Phi_r(g)$")
-ax.set_title("Temporal origin: shuffle collapses Φ_r(g)")
+ax.set_title("(b) temporal origin: shuffle ablation")
+ax.set_xlim(-0.5, 1.5)
 
-# annotation
 collapse = (1 - g_s.mean() / g_o.mean()) * 100
 ax.text(0.5, 0.96, f"{collapse:.1f}% collapse\np < 10⁻¹³⁰",
         transform=ax.transAxes, ha="center", va="top", fontsize=9,
         bbox=dict(boxstyle="round,pad=0.3", fc="white",
                   ec=COLOR_NEUTRAL, lw=0.7))
 
-# connect mean points
-ax.plot([0, 1], means, color=COLOR_NEUTRAL, alpha=0.4, zorder=1, lw=0.8)
-
 plt.tight_layout()
-save(fig, "fig2_shuffle_collapse")
+save(fig, "fig1_separation_and_shuffle")
 plt.show()
 
 
-# %% [FIG 3] Learning's two effects -------------------------------------------
+# %% [FIG 2] Magnitude: Φ_r(g) untrained vs trained ----------------------------
 """
-(a) Φ_r(g) magnitude: untrained > trained (paradox)
-(b) Atom decomposition: stacked bar, group sums, untrained vs trained, clean
+Untrained (left) as scatter points, trained (right) as violin.
+Style follows Fig 1's dual convention: the side with less structure → scatter.
+Here both sides have structure, but per your taste preference: left as points.
 """
 
-fig, axes = plt.subplots(1, 2, figsize=(8.5, 3.6),
-                         gridspec_kw={"width_ratios": [1.0, 1.2]})
+fig, ax = plt.subplots(figsize=(4.5, 3.8))
 
-# --- (a) magnitude comparison ---
-ax = axes[0]
-data = [du_clean["phi_r_g"].values, dt_clean["phi_r_g"].values]
-parts = ax.violinplot(data, positions=[0, 1], widths=0.7,
-                       showmedians=True, showextrema=False)
-for i, pc in enumerate(parts["bodies"]):
-    pc.set_facecolor([COLOR_UNTRAINED, COLOR_TRAINED][i])
-    pc.set_alpha(0.7)
-    pc.set_edgecolor("white")
-parts["cmedians"].set_color(COLOR_NEUTRAL)
-parts["cmedians"].set_linewidth(1.3)
+g_un = du_clean["phi_r_g"].values
+g_tr = dt_clean["phi_r_g"].values
+
+# left: untrained as scatter
+jit_u = rng.normal(0, 0.06, size=len(g_un))
+ax.scatter(0 + jit_u, g_un, s=10, color=COLOR_UNTRAINED, alpha=0.45,
+           zorder=2, edgecolor="none")
+ax.hlines(g_un.mean(), -0.20, 0.20, colors=COLOR_NEUTRAL, lw=1.6, zorder=4)
+
+# right: trained as violin
+v = ax.violinplot([g_tr], positions=[1], widths=0.7,
+                  showmedians=True, showextrema=False)
+v["bodies"][0].set_facecolor(COLOR_TRAINED)
+v["bodies"][0].set_alpha(0.7)
+v["bodies"][0].set_edgecolor("white")
+v["cmedians"].set_color(COLOR_NEUTRAL)
+v["cmedians"].set_linewidth(1.3)
+
 ax.set_xticks([0, 1])
 ax.set_xticklabels(["untrained", "trained"])
 ax.set_ylabel(r"$\Phi_r(g)$")
-ax.set_title("(a) magnitude (clean)")
+ax.set_title("Magnitude: untrained vs trained (clean)")
+ax.set_xlim(-0.5, 1.5)
 
-dlearned = dt_clean["phi_r_g"].mean() - du_clean["phi_r_g"].mean()
+dlearned = g_tr.mean() - g_un.mean()
 ax.text(0.5, 0.96, f"Δ(learned) = {dlearned:+.2f}\np < 10⁻⁹⁰",
         transform=ax.transAxes, ha="center", va="top", fontsize=9,
         bbox=dict(boxstyle="round,pad=0.3", fc="white",
                   ec=COLOR_NEUTRAL, lw=0.7))
 
-# --- (b) atom group composition ---
-ax = axes[1]
+plt.tight_layout()
+save(fig, "fig2_magnitude")
+plt.show()
+
+
+# %% [FIG 3] Atom-group decomposition (clean) ----------------------------------
+"""
+Stand-alone atom-group composition. Bars with per-seed scatter overlay
+to show distribution density, not just means.
+"""
+
+fig, ax = plt.subplots(figsize=(7.0, 4.2))
+
 groups = ["group_decoupling", "group_downward", "group_part_driven"]
-group_labels = ["decoupling\n(whole→whole)", "downward\n(whole→part)",
+group_labels = ["decoupling\n(whole→whole)",
+                "downward\n(whole→part)",
                 "part-driven\n(part→·)"]
 
 clean_atoms = atoms[atoms.condition == "clean"]
@@ -213,7 +204,7 @@ tr = clean_atoms[clean_atoms.group == "trained"]
 un = clean_atoms[clean_atoms.group == "untrained"]
 
 x = np.arange(len(groups))
-w = 0.38
+w = 0.36
 un_vals = [un[g].mean() for g in groups]
 tr_vals = [tr[g].mean() for g in groups]
 un_err  = [un[g].std() / np.sqrt(len(un)) for g in groups]
@@ -221,35 +212,50 @@ tr_err  = [tr[g].std() / np.sqrt(len(tr)) for g in groups]
 
 ax.bar(x - w/2, un_vals, w, yerr=un_err,
        color=COLOR_UNTRAINED, label="untrained",
-       edgecolor="white", linewidth=0.5, error_kw={"lw": 0.8, "capsize": 2.5})
+       edgecolor="white", linewidth=0.5,
+       error_kw={"lw": 0.9, "capsize": 3.0}, zorder=3)
 ax.bar(x + w/2, tr_vals, w, yerr=tr_err,
        color=COLOR_TRAINED, label="trained",
-       edgecolor="white", linewidth=0.5, error_kw={"lw": 0.8, "capsize": 2.5})
+       edgecolor="white", linewidth=0.5,
+       error_kw={"lw": 0.9, "capsize": 3.0}, zorder=3)
 
-ax.axhline(0, color=COLOR_NEUTRAL, lw=0.5, zorder=0)
+# scatter overlay: per-episode values
+for i, g in enumerate(groups):
+    un_pts = un[g].values
+    tr_pts = tr[g].values
+    j_u = rng.normal(0, 0.06, size=len(un_pts))
+    j_t = rng.normal(0, 0.06, size=len(tr_pts))
+    ax.scatter(i - w/2 + j_u, un_pts, s=3, color=COLOR_UNTRAINED,
+               alpha=0.12, zorder=2, edgecolor="none")
+    ax.scatter(i + w/2 + j_t, tr_pts, s=3, color=COLOR_TRAINED,
+               alpha=0.12, zorder=2, edgecolor="none")
+
+# zero line emphasized — this is where the sign flip happens
+ax.axhline(0, color=COLOR_NEUTRAL, lw=0.7, zorder=1)
+
 ax.set_xticks(x)
-ax.set_xticklabels(group_labels, fontsize=8.5)
+ax.set_xticklabels(group_labels, fontsize=9.5)
 ax.set_ylabel(r"$\Phi_r$ contribution")
-ax.set_title("(b) atom-group decomposition (clean)")
+ax.set_title("Atom-group decomposition (clean)")
 ax.legend(loc="upper right", frameon=False)
 
-# highlight decoupling sign flip
-ax.annotate("sign flip:\nlearning makes\nthe whole irreducible",
-            xy=(0, tr_vals[0]), xytext=(0.5, 1.6),
-            fontsize=8, ha="left", color=COLOR_NEUTRAL,
-            arrowprops=dict(arrowstyle="->", color=COLOR_NEUTRAL,
-                            lw=0.7, connectionstyle="arc3,rad=-0.2"))
+# Annotate the decoupling sign flip with a short numerical note,
+# not a long arrow that crowds the plot.
+ax.text(0, un_vals[0] - 0.25,
+        f"untrained: {un_vals[0]:+.2f}",
+        ha="center", va="top", fontsize=8, color=COLOR_UNTRAINED)
+ax.text(0, tr_vals[0] + 0.18,
+        f"trained: {tr_vals[0]:+.2f}",
+        ha="center", va="bottom", fontsize=8, color=COLOR_TRAINED)
 
 plt.tight_layout()
-save(fig, "fig3_two_effects")
+save(fig, "fig3_atom_decomposition")
 plt.show()
 
 
-# %% [FIG 4] Hysteresis curves ------------------------------------------------
+# %% [FIG 4] Hysteresis curves -------------------------------------------------
 """
-Switch-aligned Φ_r(g) trajectories, trained vs untrained.
-Median + IQR shaded band. Vertical line at switch (tau=0).
-Focus window: tau ∈ [-100, +140] (avoid the early-episode drift).
+Switch-aligned Φ_r(g) trajectories. y ∈ [0.25, 3.0]. No comment box.
 """
 
 fig, ax = plt.subplots(figsize=(6.5, 3.8))
@@ -261,115 +267,132 @@ tr_h = hyst[(hyst.group == "trained") &
 un_h = hyst[(hyst.group == "untrained") &
             (hyst.tau_bin >= TAU_MIN) & (hyst.tau_bin <= TAU_MAX)].sort_values("tau_bin")
 
-# trained
 ax.fill_between(tr_h["tau_bin"], tr_h["q25"], tr_h["q75"],
-                color=COLOR_TRAINED, alpha=0.25, linewidth=0)
+                color=COLOR_TRAINED, alpha=0.20, linewidth=0)
 ax.plot(tr_h["tau_bin"], tr_h["median"], color=COLOR_TRAINED, lw=1.8,
-        label="trained", marker="o", markersize=3)
+        label="trained", marker="o", markersize=3.5)
 
-# untrained
 ax.fill_between(un_h["tau_bin"], un_h["q25"], un_h["q75"],
-                color=COLOR_UNTRAINED, alpha=0.25, linewidth=0)
+                color=COLOR_UNTRAINED, alpha=0.20, linewidth=0)
 ax.plot(un_h["tau_bin"], un_h["median"], color=COLOR_UNTRAINED, lw=1.8,
-        label="untrained", marker="s", markersize=3)
+        label="untrained", marker="s", markersize=3.5)
 
-# switch line
 ax.axvline(0, color=COLOR_NEUTRAL, lw=0.8, ls="--", alpha=0.6)
-ax.text(0, ax.get_ylim()[1] * 0.97, " regime switch",
-        ha="left", va="top", fontsize=8, color=COLOR_NEUTRAL)
+ax.text(0, 2.92, " regime switch",
+        ha="left", va="top", fontsize=8.5, color=COLOR_NEUTRAL)
 
 ax.set_xlabel(r"$\tau$  =  window center $-$ switch  (steps)")
 ax.set_ylabel(r"$\Phi_r(g)$")
-ax.set_title("Switch-aligned hysteresis: trained adapts slowly, untrained jumps")
+ax.set_title("Switch-aligned $\\Phi_r(g)$ trajectory")
 ax.legend(loc="upper right", frameon=False)
 ax.set_xlim(TAU_MIN, TAU_MAX)
-
-# annotation: overshoot for trained
-ax.text(0.05, 0.05,
-        "trained: transient overshoot →\n"
-        "             slow relaxation\n"
-        "untrained: immediate drop, then flat",
-        transform=ax.transAxes, fontsize=8, color=COLOR_NEUTRAL,
-        va="bottom", ha="left",
-        bbox=dict(boxstyle="round,pad=0.4", fc="white",
-                  ec=COLOR_NEUTRAL, lw=0.5))
+ax.set_ylim(0.25, 3.0)
 
 plt.tight_layout()
 save(fig, "fig4_hysteresis")
 plt.show()
 
 
-# %% [FIG 5] Atom-level regime sensitivity ------------------------------------
+# %% [FIG 5] Atom-level regime sensitivity (unified panel) ---------------------
 """
-Paired pre→post changes per atom group, trained and untrained side by side.
-Two panels (trained, untrained), each shows three group-Δ paired plots.
+Single panel: x-axis is atom group, with trained and untrained shown
+as side-by-side pairs of pre/post markers. This mirrors Fig 3's layout
+(trained/untrained side-by-side) so the eye can compare directly.
+
+For each group:
+  - untrained pre (circle, light)
+  - untrained post (diamond, solid)  → arrow shows direction
+  - trained pre (circle, light)
+  - trained post (diamond, solid)    → arrow shows direction
+
+Δ annotations placed beneath each pair.
 """
 
-fig, axes = plt.subplots(1, 2, figsize=(9.0, 4.0), sharey=True)
+from scipy.stats import ttest_1samp
+
+fig, ax = plt.subplots(figsize=(9.0, 4.6))
 
 groups = ["group_decoupling", "group_downward", "group_part_driven"]
-group_short = ["decoupling", "downward", "part-driven"]
+group_labels = ["decoupling\n(whole→whole)",
+                "downward\n(whole→part)",
+                "part-driven\n(part→·)"]
 
-for ax_i, grp_id in enumerate(["trained", "untrained"]):
-    ax = axes[ax_i]
-    color = [COLOR_TRAINED, COLOR_UNTRAINED][ax_i]
+# offsets within each group: untrained pre/post, trained pre/post
+offsets = {
+    ("untrained", "pre"):  -0.30,
+    ("untrained", "post"): -0.10,
+    ("trained",   "pre"):  +0.10,
+    ("trained",   "post"): +0.30,
+}
 
+def get_paired(grp_id, g):
     pre = atoms[(atoms.condition == "p20_pre") & (atoms.group == grp_id)]
     post = atoms[(atoms.condition == "p20_post") & (atoms.group == grp_id)]
-    merged = pre.merge(post, on=["seed", "episode"], suffixes=("_pre", "_post"))
+    m = pre.merge(post, on=["seed", "episode"], suffixes=("_pre", "_post"))
+    return m[f"{g}_pre"].values, m[f"{g}_post"].values
 
-    for j, g in enumerate(groups):
-        pre_vals = merged[f"{g}_pre"].values
-        post_vals = merged[f"{g}_post"].values
+# plot each group
+for j, g in enumerate(groups):
+    for cohort in ["untrained", "trained"]:
+        color = COLOR_UNTRAINED if cohort == "untrained" else COLOR_TRAINED
+        pre_vals, post_vals = get_paired(cohort, g)
+        x_pre  = j + offsets[(cohort, "pre")]
+        x_post = j + offsets[(cohort, "post")]
+
+        # arrow from pre mean to post mean
+        ax.annotate("",
+                    xy=(x_post, post_vals.mean()),
+                    xytext=(x_pre, pre_vals.mean()),
+                    arrowprops=dict(arrowstyle="->", color=color, lw=1.6),
+                    zorder=3)
+        # markers
+        ax.scatter([x_pre], [pre_vals.mean()], s=70, color=color,
+                   marker="o", edgecolor="white", linewidth=1.3, zorder=4)
+        ax.scatter([x_post], [post_vals.mean()], s=70, color=color,
+                   marker="D", edgecolor="white", linewidth=1.3, zorder=4)
+
+        # delta annotation, with p-value
         diffs = post_vals - pre_vals
-
-        # individual paired lines (faint)
-        rng = np.random.default_rng(j)
-        for p, q in zip(pre_vals, post_vals):
-            ax.plot([j - 0.18, j + 0.18], [p, q],
-                    color=color, alpha=0.04, lw=0.5, zorder=1)
-
-        # pre/post means as filled markers
-        ax.scatter([j - 0.18], [pre_vals.mean()], s=55,
-                   color=color, edgecolor="white", linewidth=1.2, zorder=4)
-        ax.scatter([j + 0.18], [post_vals.mean()], s=55,
-                   color=color, edgecolor="white", linewidth=1.2,
-                   marker="D", zorder=4)
-        # connecting arrow on means
-        ax.annotate("", xy=(j + 0.18, post_vals.mean()),
-                    xytext=(j - 0.18, pre_vals.mean()),
-                    arrowprops=dict(arrowstyle="->", color=color, lw=1.4))
-
-        # delta annotation
-        # p-value via paired t (recompute here, kept simple)
-        from scipy.stats import ttest_1samp
         _, pv = ttest_1samp(diffs, 0)
-        sig = "ns" if pv >= 0.05 else f"p={pv:.0e}"
-        ax.text(j, ax.get_ylim()[0] if hasattr(ax, '_y0') else -1.0,
-                f"Δ={diffs.mean():+.2f}\n{sig}",
-                ha="center", va="top", fontsize=7.5, color=COLOR_NEUTRAL)
+        sig = "n.s." if pv >= 0.05 else f"p={pv:.0e}"
+        # place below cohort group
+        x_mid = (x_pre + x_post) / 2
+        ax.text(x_mid, -2.3, f"Δ={diffs.mean():+.2f}\n{sig}",
+                ha="center", va="top", fontsize=7.5, color=color)
 
-    ax.axhline(0, color=COLOR_NEUTRAL, lw=0.5, zorder=0)
-    ax.set_xticks(np.arange(len(groups)))
-    ax.set_xticklabels(group_short, fontsize=9)
-    ax.set_title(f"{grp_id}", color=color)
-    if ax_i == 0:
-        ax.set_ylabel(r"$\Phi_r$ contribution")
+# group separators
+for j in range(len(groups) - 1):
+    ax.axvline(j + 0.5, color=COLOR_FAINT, lw=0.6, zorder=0)
+ax.axhline(0, color=COLOR_NEUTRAL, lw=0.5, zorder=0)
 
-# shared legend (markers)
+# cohort labels above each pair within each group
+for j in range(len(groups)):
+    ax.text(j + offsets[("untrained", "pre")] / 2 + offsets[("untrained", "post")] / 2,
+            ax.get_ylim()[1] if False else 3.7,
+            "untrained", ha="center", va="bottom",
+            fontsize=8, color=COLOR_UNTRAINED)
+    ax.text(j + offsets[("trained", "pre")] / 2 + offsets[("trained", "post")] / 2,
+            3.7,
+            "trained", ha="center", va="bottom",
+            fontsize=8, color=COLOR_TRAINED)
+
+ax.set_xticks(np.arange(len(groups)))
+ax.set_xticklabels(group_labels, fontsize=10)
+ax.set_ylabel(r"$\Phi_r$ contribution")
+ax.set_title("Atom-level regime sensitivity (pre $\\to$ post regime switch)")
+ax.set_ylim(-2.5, 4.0)
+ax.set_xlim(-0.55, len(groups) - 0.45)
+
+# legend for markers
 from matplotlib.lines import Line2D
 legend_elems = [
     Line2D([0], [0], marker="o", color="w", markerfacecolor=COLOR_NEUTRAL,
-           markeredgecolor="white", markersize=8, label="pre"),
+           markeredgecolor="white", markersize=9, label="pre"),
     Line2D([0], [0], marker="D", color="w", markerfacecolor=COLOR_NEUTRAL,
-           markeredgecolor="white", markersize=8, label="post"),
+           markeredgecolor="white", markersize=9, label="post"),
 ]
-fig.legend(handles=legend_elems, loc="upper center", ncol=2,
-           frameon=False, bbox_to_anchor=(0.5, 1.02))
-
-fig.suptitle("Atom-level regime sensitivity: trained protects decoupling, "
-             "lets downward adapt",
-             y=1.07, fontsize=11)
+ax.legend(handles=legend_elems, loc="upper right",
+          frameon=False, ncol=2)
 
 plt.tight_layout()
 save(fig, "fig5_atom_sensitivity")
