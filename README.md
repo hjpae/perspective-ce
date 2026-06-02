@@ -1,4 +1,4 @@
-# perspective-ce    
+# perspective-ce (causal emergence)    
 
 ## Vast.ai instance setup 
 
