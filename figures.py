@@ -61,43 +61,77 @@ atoms    = pd.read_csv(DATA / "rq5_atoms_decomp.csv")
 print("  loaded.")
 
 
+# %% [HELPER] raincloud plot (vertical: scatter left, half-violin right) -------
+def raincloud(ax, data, position, color, width=0.7, alpha_v=0.7,
+              alpha_s=0.35, scatter_size=8, scatter_offset=0.10,
+              violin_offset=0.02, rng_seed=0):
+    """
+    Vertical raincloud at a single x-position.
+        - Left half: scatter (jittered)
+        - Right half: half-violin (KDE)
+        - Mean shown as a short horizontal tick
+    """
+    data = np.asarray(data)
+    data = data[~np.isnan(data)]
+    rng_local = np.random.default_rng(rng_seed)
+
+    # === left: scatter (jittered to the left of position) ===
+    jit = rng_local.normal(0, 0.04, size=len(data))
+    ax.scatter(position - scatter_offset + jit, data,
+               s=scatter_size, color=color, alpha=alpha_s,
+               zorder=2, edgecolor="none")
+
+    # === right: half-violin via KDE ===
+    if data.std() > 1e-9 and len(data) > 2:
+        from scipy.stats import gaussian_kde
+        kde = gaussian_kde(data)
+        ymin, ymax = data.min(), data.max()
+        pad = (ymax - ymin) * 0.05 + 1e-6
+        ys = np.linspace(ymin - pad, ymax + pad, 200)
+        dens = kde(ys)
+        # normalize to half-width
+        dens = dens / dens.max() * (width / 2.0)
+        x_right = position + violin_offset + dens
+        # filled half-violin
+        ax.fill_betweenx(ys, position + violin_offset, x_right,
+                         color=color, alpha=alpha_v, linewidth=0, zorder=3)
+        # thin outline
+        ax.plot(x_right, ys, color=color, lw=0.6, alpha=0.9, zorder=4)
+        # baseline (vertical edge of the half-violin)
+        ax.plot([position + violin_offset, position + violin_offset],
+                [ymin - pad, ymax + pad],
+                color=color, lw=0.6, alpha=0.6, zorder=4)
+
+    # mean tick
+    mean_val = data.mean()
+    ax.hlines(mean_val,
+              position - scatter_offset - 0.07,
+              position + violin_offset + (width / 2.0) + 0.02,
+              colors=COLOR_NEUTRAL, lw=1.3, zorder=5)
+
+
 # %% [FIG 1] Architectural separation + Temporal origin (merged) ---------------
 """
 Merged Fig 1:
-  (a) Φ_r(z) vs Φ_r(g) — pooled distributions (trained, clean).
-      Left side (Φ_r(z)) as scatter, right side (Φ_r(g)) as violin.
-  (b) Φ_r(g) original vs shuffled — same dual style (left scatter, right violin).
+  (a) Φ_r(z) vs Φ_r(g) — each as a vertical raincloud (scatter left, half-violin right).
+  (b) Φ_r(g) original vs shuffled — same raincloud style.
 """
 
 fig, axes = plt.subplots(1, 2, figsize=(8.5, 3.6))
 
-# === (a) z (scatter) vs g (violin) ===
+# === (a) z vs g ===
 ax = axes[0]
 z_vals = dt_clean["phi_r_z"].values
 g_vals = dt_clean["phi_r_g"].values
 
-# left: z as scatter (jittered)
-rng = np.random.default_rng(0)
-jit_z = rng.normal(0, 0.06, size=len(z_vals))
-ax.scatter(0 + jit_z, z_vals, s=8, color=COLOR_NEUTRAL, alpha=0.35, zorder=2,
-           edgecolor="none")
-# mark mean
-ax.hlines(z_vals.mean(), -0.18, 0.18, colors=COLOR_NEUTRAL, lw=1.5, zorder=4)
-
-# right: g as violin
-v = ax.violinplot([g_vals], positions=[1], widths=0.7,
-                  showmedians=True, showextrema=False)
-v["bodies"][0].set_facecolor(COLOR_TRAINED)
-v["bodies"][0].set_alpha(0.7)
-v["bodies"][0].set_edgecolor("white")
-v["cmedians"].set_color(COLOR_NEUTRAL)
-v["cmedians"].set_linewidth(1.3)
+raincloud(ax, z_vals, position=0, color=COLOR_NEUTRAL, rng_seed=1)
+raincloud(ax, g_vals, position=1, color=COLOR_TRAINED,  rng_seed=2)
 
 ax.set_xticks([0, 1])
 ax.set_xticklabels([r"$\Phi_r(z)$", r"$\Phi_r(g)$"])
 ax.set_ylabel(r"$\Phi_r$")
 ax.set_title("(a) architectural separation (trained, clean)")
-ax.set_xlim(-0.5, 1.5)
+ax.set_xlim(-0.5, 1.6)
 
 ratio = g_vals.mean() / max(z_vals.mean(), 1e-6)
 ax.text(0.5, 0.96, f"ratio g/z = {ratio:.0f}×\np < 10⁻¹³⁰",
@@ -105,31 +139,19 @@ ax.text(0.5, 0.96, f"ratio g/z = {ratio:.0f}×\np < 10⁻¹³⁰",
         bbox=dict(boxstyle="round,pad=0.3", fc="white",
                   ec=COLOR_NEUTRAL, lw=0.7))
 
-# === (b) original vs shuffled — same dual style ===
+# === (b) original vs shuffled ===
 ax = axes[1]
 g_o = shuffle["phi_g_orig"].values
 g_s = shuffle["phi_g_shuf"].values
 
-# left: original as violin (it has structure to show)
-v = ax.violinplot([g_o], positions=[0], widths=0.7,
-                  showmedians=True, showextrema=False)
-v["bodies"][0].set_facecolor(COLOR_TRAINED)
-v["bodies"][0].set_alpha(0.7)
-v["bodies"][0].set_edgecolor("white")
-v["cmedians"].set_color(COLOR_NEUTRAL)
-v["cmedians"].set_linewidth(1.3)
-
-# right: shuffled as scatter (collapsed to near-zero)
-jit_s = rng.normal(0, 0.06, size=len(g_s))
-ax.scatter(1 + jit_s, g_s, s=8, color=COLOR_NEUTRAL, alpha=0.35, zorder=2,
-           edgecolor="none")
-ax.hlines(g_s.mean(), 1 - 0.18, 1 + 0.18, colors=COLOR_NEUTRAL, lw=1.5, zorder=4)
+raincloud(ax, g_o, position=0, color=COLOR_TRAINED, rng_seed=3)
+raincloud(ax, g_s, position=1, color=COLOR_NEUTRAL, rng_seed=4)
 
 ax.set_xticks([0, 1])
 ax.set_xticklabels(["original", "shuffled\n(temporal)"])
 ax.set_ylabel(r"$\Phi_r(g)$")
 ax.set_title("(b) temporal origin: shuffle ablation")
-ax.set_xlim(-0.5, 1.5)
+ax.set_xlim(-0.5, 1.6)
 
 collapse = (1 - g_s.mean() / g_o.mean()) * 100
 ax.text(0.5, 0.96, f"{collapse:.1f}% collapse\np < 10⁻¹³⁰",
@@ -144,36 +166,22 @@ plt.show()
 
 # %% [FIG 2] Magnitude: Φ_r(g) untrained vs trained ----------------------------
 """
-Untrained (left) as scatter points, trained (right) as violin.
-Style follows Fig 1's dual convention: the side with less structure → scatter.
-Here both sides have structure, but per your taste preference: left as points.
+Raincloud-style: each cohort as scatter (left) + half-violin (right).
 """
 
-fig, ax = plt.subplots(figsize=(4.5, 3.8))
+fig, ax = plt.subplots(figsize=(4.8, 4.0))
 
 g_un = du_clean["phi_r_g"].values
 g_tr = dt_clean["phi_r_g"].values
 
-# left: untrained as scatter
-jit_u = rng.normal(0, 0.06, size=len(g_un))
-ax.scatter(0 + jit_u, g_un, s=10, color=COLOR_UNTRAINED, alpha=0.45,
-           zorder=2, edgecolor="none")
-ax.hlines(g_un.mean(), -0.20, 0.20, colors=COLOR_NEUTRAL, lw=1.6, zorder=4)
-
-# right: trained as violin
-v = ax.violinplot([g_tr], positions=[1], widths=0.7,
-                  showmedians=True, showextrema=False)
-v["bodies"][0].set_facecolor(COLOR_TRAINED)
-v["bodies"][0].set_alpha(0.7)
-v["bodies"][0].set_edgecolor("white")
-v["cmedians"].set_color(COLOR_NEUTRAL)
-v["cmedians"].set_linewidth(1.3)
+raincloud(ax, g_un, position=0, color=COLOR_UNTRAINED, rng_seed=10)
+raincloud(ax, g_tr, position=1, color=COLOR_TRAINED,    rng_seed=11)
 
 ax.set_xticks([0, 1])
 ax.set_xticklabels(["untrained", "trained"])
 ax.set_ylabel(r"$\Phi_r(g)$")
 ax.set_title("Magnitude: untrained vs trained (clean)")
-ax.set_xlim(-0.5, 1.5)
+ax.set_xlim(-0.5, 1.6)
 
 dlearned = g_tr.mean() - g_un.mean()
 ax.text(0.5, 0.96, f"Δ(learned) = {dlearned:+.2f}\np < 10⁻⁹⁰",
@@ -186,68 +194,41 @@ save(fig, "fig2_magnitude")
 plt.show()
 
 
-# %% [FIG 3] Atom-group decomposition (clean) ----------------------------------
+# %% [FIG 3] Atom-group decomposition (3 subplots, each with own y-range) ------
 """
-Stand-alone atom-group composition. Bars with per-seed scatter overlay
-to show distribution density, not just means.
+Three side-by-side subplots, one per atom group.
+Each shows untrained vs trained as rainclouds with its own y-axis range,
+so decoupling and part-driven are not crushed by downward's scale.
 """
-
-fig, ax = plt.subplots(figsize=(7.0, 4.2))
 
 groups = ["group_decoupling", "group_downward", "group_part_driven"]
-group_labels = ["decoupling\n(whole→whole)",
-                "downward\n(whole→part)",
-                "part-driven\n(part→·)"]
+group_labels = ["decoupling\n(whole$\\to$whole)",
+                "downward\n(whole$\\to$part)",
+                "part-driven\n(part$\\to$$\\cdot$)"]
 
 clean_atoms = atoms[atoms.condition == "clean"]
-tr = clean_atoms[clean_atoms.group == "trained"]
-un = clean_atoms[clean_atoms.group == "untrained"]
 
-x = np.arange(len(groups))
-w = 0.36
-un_vals = [un[g].mean() for g in groups]
-tr_vals = [tr[g].mean() for g in groups]
-un_err  = [un[g].std() / np.sqrt(len(un)) for g in groups]
-tr_err  = [tr[g].std() / np.sqrt(len(tr)) for g in groups]
+fig, axes = plt.subplots(1, 3, figsize=(9.5, 4.2))
 
-ax.bar(x - w/2, un_vals, w, yerr=un_err,
-       color=COLOR_UNTRAINED, label="untrained",
-       edgecolor="white", linewidth=0.5,
-       error_kw={"lw": 0.9, "capsize": 3.0}, zorder=3)
-ax.bar(x + w/2, tr_vals, w, yerr=tr_err,
-       color=COLOR_TRAINED, label="trained",
-       edgecolor="white", linewidth=0.5,
-       error_kw={"lw": 0.9, "capsize": 3.0}, zorder=3)
+for i, (g, label) in enumerate(zip(groups, group_labels)):
+    ax = axes[i]
+    un_vals = clean_atoms[clean_atoms.group == "untrained"][g].values
+    tr_vals = clean_atoms[clean_atoms.group == "trained"][g].values
 
-# scatter overlay: per-episode values
-for i, g in enumerate(groups):
-    un_pts = un[g].values
-    tr_pts = tr[g].values
-    j_u = rng.normal(0, 0.06, size=len(un_pts))
-    j_t = rng.normal(0, 0.06, size=len(tr_pts))
-    ax.scatter(i - w/2 + j_u, un_pts, s=3, color=COLOR_UNTRAINED,
-               alpha=0.12, zorder=2, edgecolor="none")
-    ax.scatter(i + w/2 + j_t, tr_pts, s=3, color=COLOR_TRAINED,
-               alpha=0.12, zorder=2, edgecolor="none")
+    raincloud(ax, un_vals, position=0, color=COLOR_UNTRAINED, rng_seed=20 + i)
+    raincloud(ax, tr_vals, position=1, color=COLOR_TRAINED,    rng_seed=30 + i)
 
-# zero line emphasized — this is where the sign flip happens
-ax.axhline(0, color=COLOR_NEUTRAL, lw=0.7, zorder=1)
+    ax.axhline(0, color=COLOR_NEUTRAL, lw=0.6, zorder=0)
+    ax.set_xticks([0, 1])
+    ax.set_xticklabels(["untrained", "trained"])
+    ax.set_xlim(-0.5, 1.6)
+    ax.set_title(f"{label}\nuntrained: {un_vals.mean():+.2f}  |  trained: {tr_vals.mean():+.2f}",
+                 fontsize=10, pad=10)
 
-ax.set_xticks(x)
-ax.set_xticklabels(group_labels, fontsize=9.5)
-ax.set_ylabel(r"$\Phi_r$ contribution")
-ax.set_title("Atom-group decomposition (clean)")
-ax.legend(loc="upper right", frameon=False)
+    if i == 0:
+        ax.set_ylabel(r"$\Phi_r$ contribution")
 
-# Annotate the decoupling sign flip with a short numerical note,
-# not a long arrow that crowds the plot.
-ax.text(0, un_vals[0] - 0.25,
-        f"untrained: {un_vals[0]:+.2f}",
-        ha="center", va="top", fontsize=8, color=COLOR_UNTRAINED)
-ax.text(0, tr_vals[0] + 0.18,
-        f"trained: {tr_vals[0]:+.2f}",
-        ha="center", va="bottom", fontsize=8, color=COLOR_TRAINED)
-
+fig.suptitle("Atom-group decomposition (clean)", y=1.00, fontsize=11.5)
 plt.tight_layout()
 save(fig, "fig3_atom_decomposition")
 plt.show()
