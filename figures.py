@@ -130,11 +130,11 @@ raincloud(ax, g_vals, position=1, color=COLOR_TRAINED,  rng_seed=2)
 ax.set_xticks([0, 1])
 ax.set_xticklabels([r"$\Phi_r(z)$", r"$\Phi_r(g)$"])
 ax.set_ylabel(r"$\Phi_r$")
-ax.set_title("(a) architectural separation (trained, clean)")
+ax.set_title("(a) architectural separation (trained z and g)")
 ax.set_xlim(-0.5, 1.6)
 
 ratio = g_vals.mean() / max(z_vals.mean(), 1e-6)
-ax.text(0.5, 0.96, f"ratio g/z = {ratio:.0f}×\np < 10⁻¹³⁰",
+ax.text(0.5, 0.96, f"ratio g/z = {ratio:.0f}x\np < 0.0001",
         transform=ax.transAxes, ha="center", va="top", fontsize=9,
         bbox=dict(boxstyle="round,pad=0.3", fc="white",
                   ec=COLOR_NEUTRAL, lw=0.7))
@@ -148,13 +148,13 @@ raincloud(ax, g_o, position=0, color=COLOR_TRAINED, rng_seed=3)
 raincloud(ax, g_s, position=1, color=COLOR_NEUTRAL, rng_seed=4)
 
 ax.set_xticks([0, 1])
-ax.set_xticklabels(["original", "shuffled\n(temporal)"])
+ax.set_xticklabels(["original", "shuffled"])
 ax.set_ylabel(r"$\Phi_r(g)$")
-ax.set_title("(b) temporal origin: shuffle ablation")
+ax.set_title("(b) temporal shuffle ablation in g")
 ax.set_xlim(-0.5, 1.6)
 
 collapse = (1 - g_s.mean() / g_o.mean()) * 100
-ax.text(0.5, 0.96, f"{collapse:.1f}% collapse\np < 10⁻¹³⁰",
+ax.text(0.5, 0.96, f"{collapse:.1f}% collapse\np < 0.0001",
         transform=ax.transAxes, ha="center", va="top", fontsize=9,
         bbox=dict(boxstyle="round,pad=0.3", fc="white",
                   ec=COLOR_NEUTRAL, lw=0.7))
@@ -175,16 +175,16 @@ g_un = du_clean["phi_r_g"].values
 g_tr = dt_clean["phi_r_g"].values
 
 raincloud(ax, g_un, position=0, color=COLOR_UNTRAINED, rng_seed=10)
-raincloud(ax, g_tr, position=1, color=COLOR_TRAINED,    rng_seed=11)
+raincloud(ax, g_tr, position=1, color=COLOR_TRAINED, rng_seed=11)
 
 ax.set_xticks([0, 1])
 ax.set_xticklabels(["untrained", "trained"])
 ax.set_ylabel(r"$\Phi_r(g)$")
-ax.set_title("Magnitude: untrained vs trained (clean)")
+#ax.set_title("Magnitude: untrained vs trained (clean)")
 ax.set_xlim(-0.5, 1.6)
 
 dlearned = g_tr.mean() - g_un.mean()
-ax.text(0.5, 0.96, f"Δ(learned) = {dlearned:+.2f}\np < 10⁻⁹⁰",
+ax.text(0.5, 0.96, f"Δ(learned) = {dlearned:+.2f}\np < 0.0001",
         transform=ax.transAxes, ha="center", va="top", fontsize=9,
         bbox=dict(boxstyle="round,pad=0.3", fc="white",
                   ec=COLOR_NEUTRAL, lw=0.7))
@@ -202,9 +202,9 @@ so decoupling and part-driven are not crushed by downward's scale.
 """
 
 groups = ["group_decoupling", "group_downward", "group_part_driven"]
-group_labels = ["decoupling\n(whole$\\to$whole)",
-                "downward\n(whole$\\to$part)",
-                "part-driven\n(part$\\to$$\\cdot$)"]
+group_labels = ["(a) decoupling (whole $\\to$ whole)",
+                "(b) downward (whole $\\to$ part)",
+                "(c) part-driven (part $\\to$ part)"]
 
 clean_atoms = atoms[atoms.condition == "clean"]
 
@@ -218,7 +218,7 @@ for i, (g, label) in enumerate(zip(groups, group_labels)):
     raincloud(ax, un_vals, position=0, color=COLOR_UNTRAINED, rng_seed=20 + i)
     raincloud(ax, tr_vals, position=1, color=COLOR_TRAINED,    rng_seed=30 + i)
 
-    ax.axhline(0, color=COLOR_NEUTRAL, lw=0.6, zorder=0)
+    ax.axhline(0, color=COLOR_NEUTRAL, lw=0.6, linestyle="--", zorder=0)
     ax.set_xticks([0, 1])
     ax.set_xticklabels(["untrained", "trained"])
     ax.set_xlim(-0.5, 1.6)
@@ -228,7 +228,7 @@ for i, (g, label) in enumerate(zip(groups, group_labels)):
     if i == 0:
         ax.set_ylabel(r"$\Phi_r$ contribution")
 
-fig.suptitle("Atom-group decomposition (clean)", y=1.00, fontsize=11.5)
+#fig.suptitle("Atom-group decomposition (clean)", y=1.00, fontsize=11.5)
 plt.tight_layout()
 save(fig, "fig3_atom_decomposition")
 plt.show()
@@ -262,9 +262,9 @@ ax.axvline(0, color=COLOR_NEUTRAL, lw=0.8, ls="--", alpha=0.6)
 ax.text(0, 2.92, " regime switch",
         ha="left", va="top", fontsize=8.5, color=COLOR_NEUTRAL)
 
-ax.set_xlabel(r"$\tau$  =  window center $-$ switch  (steps)")
+ax.set_xlabel(r"$\tau$ = steps (window center - switch)")
 ax.set_ylabel(r"$\Phi_r(g)$")
-ax.set_title("Switch-aligned $\\Phi_r(g)$ trajectory")
+#ax.set_title("Switch-aligned $\\Phi_r(g)$ trajectory")
 ax.legend(loc="upper right", frameon=False)
 ax.set_xlim(TAU_MIN, TAU_MAX)
 ax.set_ylim(0.25, 3.0)
@@ -379,4 +379,87 @@ plt.tight_layout()
 save(fig, "fig5_atom_sensitivity")
 plt.show()
 
+# %% [FIG 5 - modified] Atom-level regime sensitivity (raincloud subplots) ----------------
+"""
+Three subplots (one per atom group), each with four rainclouds:
+  untrained pre, untrained post, trained pre, trained post.
+Each subplot has its own y-axis range, matching Fig 3's layout.
+"""
+
+from scipy.stats import ttest_1samp
+
+groups = ["group_decoupling", "group_downward", "group_part_driven"]
+group_labels = ["decoupling (whole $\\to$ whole)",
+                "downward (whole $\\to$ part)",
+                "part-driven (part $\\to$ part)"]
+
+def get_paired(grp_id, g):
+    pre = atoms[(atoms.condition == "p20_pre") & (atoms.group == grp_id)]
+    post = atoms[(atoms.condition == "p20_post") & (atoms.group == grp_id)]
+    m = pre.merge(post, on=["seed", "episode"], suffixes=("_pre", "_post"))
+    return m[f"{g}_pre"].values, m[f"{g}_post"].values
+
+fig, axes = plt.subplots(1, 3, figsize=(11.5, 4.6))
+
+for i, (g, label) in enumerate(zip(groups, group_labels)):
+    ax = axes[i]
+
+    un_pre, un_post = get_paired("untrained", g)
+    tr_pre, tr_post = get_paired("trained",   g)
+
+    # 4 rainclouds at positions 0, 1, 2, 3
+    raincloud(ax, un_pre,  position=0, color=COLOR_UNTRAINED, rng_seed=40 + i)
+    raincloud(ax, un_post, position=1, color=COLOR_UNTRAINED, rng_seed=50 + i)
+    raincloud(ax, tr_pre,  position=2, color=COLOR_TRAINED,   rng_seed=60 + i)
+    raincloud(ax, tr_post, position=3, color=COLOR_TRAINED,   rng_seed=70 + i)
+
+    # paired-t deltas for untrained and trained
+    _, p_un = ttest_1samp(un_post - un_pre, 0)
+    _, p_tr = ttest_1samp(tr_post - tr_pre, 0)
+    d_un = (un_post - un_pre).mean()
+    d_tr = (tr_post - tr_pre).mean()
+
+    ax.axhline(0, color=COLOR_NEUTRAL, lw=0.6, linestyle="--", zorder=0)
+    # subtle vertical separator between cohorts
+    ax.axvline(1.5, color=COLOR_FAINT, lw=0.7, zorder=0)
+
+    ax.set_xticks([0, 1, 2, 3])
+    ax.set_xticklabels(["pre", "post", "pre", "post"], fontsize=9)
+    ax.set_xlim(-0.6, 3.6)
+
+    # cohort labels above the x-tick row, color-coded
+    ymin, ymax = ax.get_ylim()
+    ypad = (ymax - ymin) * 0.08
+    ax.set_ylim(ymin, ymax + ypad)
+
+    # title with group name + paired deltas color-coded
+    ax.set_title(
+        f"{label}\n"
+        f"$\\Delta_{{untrained}}$={d_un:+.2f}  |  $\\Delta_{{trained}}$={d_tr:+.2f}",
+        fontsize=10, pad=8)
+
+    # cohort row label below x-ticks
+    # (handled in a separate pass below using data coords for correct positioning)
+
+    if i == 0:
+        ax.set_ylabel(r"$\Phi_r$ contribution")
+
+# Cohort labels at proper data x-coordinates, below each axis.
+for ax in axes:
+    yloc = ax.get_ylim()[0]
+    span = ax.get_ylim()[1] - ax.get_ylim()[0]
+    label_y = yloc - 0.13 * span
+    ax.annotate("untrained", xy=(0.5, label_y),
+                xycoords=("data", "data"), ha="center", va="top",
+                fontsize=9, color=COLOR_UNTRAINED, annotation_clip=False)
+    ax.annotate("trained", xy=(2.5, label_y),
+                xycoords=("data", "data"), ha="center", va="top",
+                fontsize=9, color=COLOR_TRAINED, annotation_clip=False)
+
+#fig.suptitle("Atom-level pre $\\to$ post regime-switch composition", y=1.01, fontsize=11.5)
+plt.tight_layout()
+save(fig, "fig5_atom_sensitivity")
+plt.show()
+
+#%%
 print("\nAll five figures saved to figs/")
