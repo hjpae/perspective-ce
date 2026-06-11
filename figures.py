@@ -389,9 +389,9 @@ Each subplot has its own y-axis range, matching Fig 3's layout.
 from scipy.stats import ttest_1samp
 
 groups = ["group_decoupling", "group_downward", "group_part_driven"]
-group_labels = ["decoupling (whole $\\to$ whole)",
-                "downward (whole $\\to$ part)",
-                "part-driven (part $\\to$ part)"]
+group_labels = ["(a) decoupling (whole $\\to$ whole)",
+                "(b) downward (whole $\\to$ part)",
+                "(c) part-driven (part $\\to$ part)"]
 
 def get_paired(grp_id, g):
     pre = atoms[(atoms.condition == "p20_pre") & (atoms.group == grp_id)]
