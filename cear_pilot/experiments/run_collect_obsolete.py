@@ -13,11 +13,6 @@ Features:
   - optional regime switch: change env zone_sigma at a chosen timestep
   - logs policy outputs every step (even under action replay):
       pi_max, pi_entropy, pi_argmax, logits_act_*, pi_act_*
-
-Journal patch:
-  - explicitly re-seeds torch/numpy AFTER checkpoint construction/loading,
-    giving matched checkpoints the same rollout stochastic stream when called
-    with the same --seed.
 """
 
 from __future__ import annotations
@@ -30,6 +25,7 @@ from typing import Dict, Any, List, Optional, Tuple
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 
 from cear_pilot.envs.nzone_grid import NZoneGridEnv, NZoneConfig
 from cear_pilot.models.agent import CEARAgent, AgentConfig
@@ -45,7 +41,10 @@ def ensure_dir(p: Path) -> None:
 
 
 def try_save_table(rows: List[Dict[str, Any]], out_path: Path) -> Path:
-    """Save to parquet if possible; otherwise csv. Return actual saved path."""
+    """
+    Save to parquet if possible; otherwise csv.
+    Returns actual saved path.
+    """
     import pandas as pd
 
     df = pd.DataFrame(rows)
@@ -108,6 +107,7 @@ def build_agent_from_meta(
     state = meta["agent_cfg"]["state"]
     pol = meta["agent_cfg"]["policy"]
 
+    # Wire dims from meta (explicit for clarity)
     agent_cfg.encoder.obs_dim = enc["obs_dim"]
     agent_cfg.encoder.proprio_dim = enc["proprio_dim"]
     agent_cfg.encoder.z_dim = enc["z_dim"]
@@ -142,13 +142,19 @@ def build_agent_from_meta(
     return agent, decoder, env
 
 
-def _policy_stats_from_s(
-    agent: CEARAgent,
-    s_t: torch.Tensor,
-) -> tuple[torch.Tensor, torch.Tensor, float, float, int]:
-    """Compute policy logits/probs and summary stats from state s."""
-    logits_act = agent.policy(s_t.detach())
-    pi_act = torch.softmax(logits_act, dim=-1)
+def _policy_stats_from_s(agent: CEARAgent, s_t: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, float, float, int]:
+    """
+    Compute policy logits/probs and summary stats from state s.
+    Uses s.detach() to avoid any accidental gradient linkage (eval mode anyway).
+    Returns:
+      logits_act: (1, A)
+      pi_act: (1, A)
+      entropy: float
+      pi_max: float
+      pi_argmax: int
+    """
+    logits_act = agent.policy(s_t.detach())  # (1, A)
+    pi_act = torch.softmax(logits_act, dim=-1)  # (1, A)
     entropy = (-torch.sum(pi_act * torch.log(pi_act + 1e-9), dim=-1)).mean()
     pi_max = pi_act.max(dim=-1).values.mean()
     pi_argmax = int(torch.argmax(pi_act, dim=-1).item())
@@ -162,54 +168,27 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--device", type=str, default="cpu")
     ap.add_argument("--greedy", action="store_true", help="Use greedy action selection")
-    ap.add_argument(
-        "--outdir",
-        type=str,
-        default="",
-        help="Override output dir (default: outputs/runs/<timestamp>)",
-    )
+    ap.add_argument("--outdir", type=str, default="", help="Override output dir (default: outputs/runs/<timestamp>)")
     ap.add_argument("--ablate_g", action="store_true", help="Force g=0 (ablation baseline)")
 
-    ap.add_argument(
-        "--zone_sigma",
-        type=float,
-        nargs=3,
-        default=None,
-        help="Override env zone_sigma as three floats: s0 s1 s2",
-    )
-    ap.add_argument(
-        "--replay_actions",
-        type=str,
-        default="",
-        help="Path to JSON containing action list for action-replay (forces same actions).",
-    )
+    ap.add_argument("--zone_sigma", type=float, nargs=3, default=None,
+                    help="Override env zone_sigma as three floats: s0 s1 s2")
+    ap.add_argument("--replay_actions", type=str, default="",
+                    help="Path to JSON containing action list for action-replay (forces same actions).")
 
-    ap.add_argument(
-        "--t_switch",
-        type=int,
-        default=-1,
-        help="If >=0, switch env zone_sigma at this timestep (uses internal step counter).",
-    )
-    ap.add_argument(
-        "--zone_sigma2",
-        type=float,
-        nargs=3,
-        default=None,
-        help="Second sigma after switch: s0 s1 s2",
-    )
+    # Regime switch options
+    ap.add_argument("--t_switch", type=int, default=-1,
+                    help="If >=0, switch env zone_sigma at this timestep (uses internal step counter).")
+    ap.add_argument("--zone_sigma2", type=float, nargs=3, default=None,
+                    help="Second sigma after switch: s0 s1 s2")
 
-    ap.add_argument(
-        "--log_policy_full",
-        action="store_true",
-        help="If set, log logits_act_* and pi_act_* columns for every action.",
-    )
+    # Optional: store full logits/pi (can be large but useful for debugging)
+    ap.add_argument("--log_policy_full", action="store_true",
+                    help="If set, log logits_act_* and pi_act_* columns for every action.")
 
-    ap.add_argument(
-        "--max_steps",
-        type=int,
-        default=-1,
-        help="Override env max_steps (-1 = use checkpoint training value)",
-    )
+    # Override env max_steps at replay time (training default is in ckpt meta)
+    ap.add_argument("--max_steps", type=int, default=-1,
+                    help="Override env max_steps (-1 = use ckpt's training value)")
 
     args = ap.parse_args()
 
@@ -230,27 +209,14 @@ def main():
     agent.to(args.device).eval()
     decoder.to(args.device).eval()
 
-    # MATCHED-EVALUATION RESEED
-    # Model construction can consume torch RNG state. Re-seeding here means
-    # matched checkpoints called with the same --seed begin from the same
-    # stochastic action-sampling stream.
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
-    torch.cuda.manual_seed_all(args.seed)
-    try:
-        env.action_space.seed(args.seed)
-        env.observation_space.seed(args.seed)
-    except Exception:
-        pass
-
     run_dir = Path(args.outdir) if args.outdir else (Path("outputs") / "runs" / timestamp_id())
     ensure_dir(run_dir)
     ensure_dir(run_dir / "figs")
 
+    # Save run meta
     run_meta = {
         "mode": "collect",
         "ckpt": str(Path(args.ckpt).resolve()),
-        "checkpoint_step": meta.get("checkpoint_step", ckpt.get("completed_steps", None)),
         "episodes": int(args.episodes),
         "seed": int(args.seed),
         "device": str(args.device),
@@ -259,9 +225,7 @@ def main():
         "zone_sigma": sigma1,
         "t_switch": int(args.t_switch),
         "zone_sigma2": sigma2,
-        "replay_actions": (
-            str(Path(args.replay_actions).resolve()) if str(args.replay_actions).strip() else ""
-        ),
+        "replay_actions": str(Path(args.replay_actions).resolve()) if str(args.replay_actions).strip() else "",
         "log_policy_full": bool(args.log_policy_full),
         "train_meta": meta,
     }
@@ -272,6 +236,7 @@ def main():
 
     replay_actions = _load_replay_actions(args.replay_actions)
 
+    # Sanity check for regime switch configuration
     if args.t_switch >= 0 and sigma2 is None:
         raise ValueError("t_switch is set but zone_sigma2 is missing. Provide --zone_sigma2 s0 s1 s2.")
     if args.t_switch >= 0 and replay_actions is not None and args.t_switch >= len(replay_actions):
@@ -289,36 +254,36 @@ def main():
         switched = False
 
         while not done:
+            # Regime switch before model step
             if (not switched) and args.t_switch >= 0 and sigma2 is not None and t == args.t_switch:
-                env.set_zone_sigma(sigma2)
+                env.set_zone_sigma(sigma2)  # requires env helper method
                 switched = True
 
             x_t = torch.tensor(obs, dtype=torch.float32, device=args.device).unsqueeze(0)
-            p_t = torch.tensor(
-                onehot(last_action, n_actions), dtype=torch.float32, device=args.device
-            ).unsqueeze(0)
+            p_t = torch.tensor(onehot(last_action, n_actions), dtype=torch.float32, device=args.device).unsqueeze(0)
 
+            # Step model / policy
             if replay_actions is None:
+                # Normal rollout: agent chooses action (greedy/stochastic)
                 with torch.no_grad():
-                    action, out = agent.step(
-                        x_t, p_t, greedy=args.greedy, ablate_g=args.ablate_g
-                    )
+                    action, out = agent.step(x_t, p_t, greedy=args.greedy, ablate_g=args.ablate_g)
                 a_int = int(action.item())
             else:
+                # Action replay: env action is forced, but g/s updates from obs
                 if t >= len(replay_actions):
                     break
                 a_int = int(replay_actions[t])
                 with torch.no_grad():
                     out = agent.forward_step(x_t, p_t, ablate_g=args.ablate_g)
 
+            # Compute policy outputs from s (always, even under replay)
             with torch.no_grad():
                 s_t = out["s"]
-                logits_act, pi_act, pi_entropy, pi_max, pi_argmax = _policy_stats_from_s(
-                    agent, s_t
-                )
+                logits_act, pi_act, pi_entropy, pi_max, pi_argmax = _policy_stats_from_s(agent, s_t)
 
             obs_next, _, terminated, truncated, info2 = env.step(a_int)
 
+            # Extract latents for logging
             g = out["g"].squeeze(0).detach().cpu().numpy()
             s = out["s"].squeeze(0).detach().cpu().numpy()
             z = out["z"].squeeze(0).detach().cpu().numpy()
@@ -329,15 +294,24 @@ def main():
                 "x": int(info2.get("x", -1)),
                 "y": int(info2.get("y", -1)),
                 "zone_id": int(info2.get("zone_id", -1)),
+
+                # The action actually executed in the env
                 "action_env": int(a_int),
+
+                # Under replay, this is the forced action; under normal, equals action_env
                 "action_replay": int(a_int) if replay_actions is not None else -1,
+
+                # What the policy would prefer at this step (given s)
                 "pi_argmax": int(pi_argmax),
                 "pi_max": float(pi_max),
                 "pi_entropy": float(pi_entropy),
+
+                # Regime switch flags
                 "switched": int(switched),
                 "t_switch": int(args.t_switch),
             }
 
+            # Record sigma parameters (for robust downstream analysis)
             if sigma1 is not None:
                 row["sigma_0"] = float(sigma1[0])
                 row["sigma_1"] = float(sigma1[1])
@@ -347,6 +321,7 @@ def main():
                 row["sigma2_1"] = float(sigma2[1])
                 row["sigma2_2"] = float(sigma2[2])
 
+            # Optional: log full logits/pi vectors
             if args.log_policy_full:
                 la = logits_act.squeeze(0).detach().cpu().numpy()
                 pa = pi_act.squeeze(0).detach().cpu().numpy()
@@ -354,6 +329,7 @@ def main():
                     row[f"logits_act_{i}"] = float(la[i])
                     row[f"pi_act_{i}"] = float(pa[i])
 
+            # Flatten obs and latents
             for i, v in enumerate(obs.astype(np.float32)):
                 row[f"obs_{i}"] = float(v)
             for i, v in enumerate(z):

@@ -34,11 +34,7 @@ def onehot(indices: torch.Tensor, n: int) -> torch.Tensor:
 
 
 @torch.no_grad()
-def make_proprio_from_last_action(
-    last_action: int,
-    n_actions: int,
-    device: torch.device,
-) -> torch.Tensor:
+def make_proprio_from_last_action(last_action: int, n_actions: int, device: torch.device) -> torch.Tensor:
     a = torch.tensor([last_action], device=device)
     return onehot(a, n_actions)
 
@@ -48,7 +44,11 @@ def save_meta(run_dir: Path, meta: Dict) -> None:
 
 
 def seed_everything(seed: int, deterministic: bool = True) -> None:
-    """Seed Python, NumPy, torch, and CuDNN deterministically."""
+    """
+    Proper seeding for reproducibility.
+    - random / numpy / torch
+    - CuDNN deterministic where applicable
+    """
     os.environ["PYTHONHASHSEED"] = str(seed)
     random.seed(seed)
     np.random.seed(seed)
@@ -57,6 +57,7 @@ def seed_everything(seed: int, deterministic: bool = True) -> None:
     torch.cuda.manual_seed_all(seed)
 
     if deterministic:
+        # makes runs more repeatable (esp. GPU); may reduce speed a bit.
         try:
             torch.use_deterministic_algorithms(True)
         except Exception:
@@ -67,7 +68,6 @@ def seed_everything(seed: int, deterministic: bool = True) -> None:
 
 class EMAMeanVar:
     """EMA mean/std tracker for stabilizing advantage scaling."""
-
     def __init__(self, beta: float = 0.99, eps: float = 1e-8):
         self.beta = beta
         self.eps = eps
@@ -81,6 +81,7 @@ class EMAMeanVar:
         else:
             m = self.mean
             self.mean = self.beta * self.mean + (1 - self.beta) * x
+            # EMA variance update (approx)
             self.var = self.beta * self.var + (1 - self.beta) * (x - m) * (x - m)
         std = float(np.sqrt(max(self.var, 0.0) + self.eps))
         return float(self.mean), std
@@ -112,17 +113,8 @@ def main():
     # ---------------------------
     # MINIMAL TRAJ LOGGING
     # ---------------------------
-    ap.add_argument(
-        "--log_traj",
-        action="store_true",
-        help="Save per-step training trajectory to train_traj.parquet",
-    )
-    ap.add_argument(
-        "--log_every",
-        type=int,
-        default=1,
-        help="Log every N steps (1 = log all steps)",
-    )
+    ap.add_argument("--log_traj", action="store_true", help="Save per-step training trajectory to train_traj.parquet")
+    ap.add_argument("--log_every", type=int, default=1, help="Log every N steps (1 = log all steps)")
 
     # actor term (Dreamer-like; internal cost, not env reward)
     ap.add_argument(
@@ -136,47 +128,6 @@ def main():
         type=float,
         default=0.98,
         help="EMA momentum for actor baseline (0 disables baseline).",
-    )
-
-    # ---------------------------
-    # JOURNAL EXPERIMENT OPTIONS
-    # ---------------------------
-    ap.add_argument(
-        "--warmup_steps",
-        type=int,
-        default=-1,
-        help=(
-            "Explicit world-model-only warmup length. "
-            "-1 preserves the legacy rule max(2000, min(steps//4, 20000))."
-        ),
-    )
-    ap.add_argument(
-        "--policy_grad_coupled",
-        action="store_true",
-        help=(
-            "After warmup, allow policy-side losses (actor + entropy) to "
-            "backpropagate through s into the representation pathway. "
-            "Default keeps the policy state detached throughout training."
-        ),
-    )
-    ap.add_argument(
-        "--outdir",
-        type=str,
-        default="",
-        help=(
-            "Explicit training output directory. "
-            "Empty preserves legacy outputs/runs/seedN behavior."
-        ),
-    )
-    ap.add_argument(
-        "--save_steps",
-        type=int,
-        nargs="*",
-        default=[],
-        help=(
-            "Completed training steps at which to save analysis checkpoints, "
-            "e.g. 0 12000 18000 24000 30000 36000 42000 48000."
-        ),
     )
 
     # ---- live viewer flags ----
@@ -193,12 +144,7 @@ def main():
 
     ap.add_argument("--p_slip", type=float, nargs=3, default=(0.0, 0.0, 0.0))
     ap.add_argument("--p_drift", type=float, nargs=3, default=(0.0, 0.0, 0.0))
-    ap.add_argument(
-        "--drift_vec",
-        type=int,
-        nargs=6,
-        default=(0, 0, 0, 0, 0, 0),
-    )
+    ap.add_argument("--drift_vec", type=int, nargs=6, default=(0, 0, 0, 0, 0, 0))  # z0dx z0dy z1dx z1dy z2dx z2dy
 
     ap.add_argument("--volatile_zone", type=int, default=0)
     ap.add_argument("--volatile_period", type=int, default=40)
@@ -215,6 +161,7 @@ def main():
     # SEED
     # ---------------------------
     seed_everything(args.seed, deterministic=True)
+
     device = torch.device(args.device)
 
     dv = args.drift_vec
@@ -225,16 +172,20 @@ def main():
         height=args.height,
         obs_dim=args.obs_dim,
         max_steps=args.max_steps,
+
         use_slip=args.use_slip,
         use_drift=args.use_drift,
         use_volatility=args.use_volatility,
         use_hazard=args.use_hazard,
+
         p_slip=tuple(args.p_slip),
         p_drift=tuple(args.p_drift),
         drift_vec=drift_vec,
+
         volatile_zone=args.volatile_zone,
         volatile_period=args.volatile_period,
         volatile_strength=args.volatile_strength,
+
         hazard_mode=args.hazard_mode,
         p_hazard=tuple(args.p_hazard),
         hazard_teleport_to=tuple(args.hazard_teleport_to),
@@ -242,8 +193,10 @@ def main():
     )
     env = NZoneGridEnv(config=env_cfg)
 
+    # make sure env RNG is seeded too
     obs, info = env.reset(seed=args.seed)
     try:
+        # gymnasium-style
         env.action_space.seed(args.seed)
         env.observation_space.seed(args.seed)
     except Exception:
@@ -277,34 +230,21 @@ def main():
     )
     decoder = ObsDecoder(dec_cfg).to(device)
 
+    # one optimizer is fine (models untouched), but we stabilize gradients below
     params = list(agent.parameters()) + list(decoder.parameters())
     opt = torch.optim.Adam(params, lr=args.lr)
 
-    # ---------------------------
-    # OUTPUT DIRECTORY
-    # ---------------------------
-    if str(args.outdir).strip():
-        run_dir = Path(args.outdir)
-    else:
-        run_dir = Path("outputs") / "runs" / f"seed{args.seed}"
-
-    # Fail on an existing directory so partial runs are never mixed silently.
+    # -----------------------------------------------------------------
+    # Save directly to seed-numbered directory.
+    # No timestamp directory.
+    # Example: outputs/runs/seed6/ckpt.pt
+    # -----------------------------------------------------------------
+    run_dir = Path("outputs") / "runs" / f"seed{args.seed}"
     run_dir.mkdir(parents=True, exist_ok=False)
 
-    # ---------------------------
-    # TRAINING SCHEDULE
-    # ---------------------------
-    if args.warmup_steps >= 0:
-        warmup_steps = int(args.warmup_steps)
-    else:
-        warmup_steps = max(2000, min(args.steps // 4, 20000))
-
-    if not (0 <= warmup_steps <= args.steps):
-        raise ValueError(
-            f"warmup_steps must lie in [0, {args.steps}], got {warmup_steps}"
-        )
-
-    condition_name = "coupled" if args.policy_grad_coupled else "default"
+    # ---- training schedule:
+    # warmup: learn world model + g dynamics first, then turn on actor
+    warmup_steps = max(2000, min(args.steps // 4, 20000))
 
     meta = {
         "seed": args.seed,
@@ -317,27 +257,12 @@ def main():
             "w_actor": args.w_actor,
         },
         "actor_b": args.actor_b,
-        # Legacy field retained for backward compatibility/documentation.
         "stopgrad_default": {
-            "policy_state_detach": True,
-            "pred_pi_detach": True,
-            "actor_cost_detach": True,
-        },
-        # Explicit record of actual journal-condition routing.
-        "journal_condition": {
-            "name": condition_name,
-            "policy_grad_coupled": bool(args.policy_grad_coupled),
-            "warmup_steps": int(warmup_steps),
-            "policy_state_detach_before_warmup": True,
-            "policy_state_detach_after_warmup": not bool(args.policy_grad_coupled),
-            "coupling_starts_at_step": (
-                int(warmup_steps) if args.policy_grad_coupled else None
-            ),
-            "pred_pi_detach": True,
-            "actor_advantage_detach": True,
+            "policy_state_detach": True,   # action policy uses s.detach()
+            "pred_pi_detach": True,        # pred mixture uses detached pi
+            "actor_cost_detach": True,     # actor uses detached cost
         },
         "warmup_steps": warmup_steps,
-        "save_steps": sorted(set(int(x) for x in args.save_steps)),
         "env_cfg": asdict(env_cfg),
         "agent_cfg": {
             "encoder": asdict(agent_cfg.encoder),
@@ -360,44 +285,15 @@ def main():
     save_meta(run_dir, meta)
 
     # ---------------------------
-    # CHECKPOINT HELPERS
-    # ---------------------------
-    save_steps = set(int(x) for x in args.save_steps)
-    invalid_steps = [s for s in save_steps if s < 0 or s > args.steps]
-    if invalid_steps:
-        raise ValueError(
-            f"--save_steps must be within [0, {args.steps}], got {sorted(invalid_steps)}"
-        )
-
-    def save_training_checkpoint(completed_steps: int) -> None:
-        ckpt_meta = dict(meta)
-        ckpt_meta["checkpoint_step"] = int(completed_steps)
-
-        ckpt = {
-            "agent_state": agent.state_dict(),
-            "decoder_state": decoder.state_dict(),
-            "optimizer_state": opt.state_dict(),
-            "completed_steps": int(completed_steps),
-            "meta": ckpt_meta,
-        }
-
-        out = run_dir / f"ckpt_step{completed_steps:05d}.pt"
-        torch.save(ckpt, out)
-        print(f"[checkpoint] {out}")
-
-    if 0 in save_steps:
-        save_training_checkpoint(0)
-
-    # ---------------------------
     # MINIMAL TRAJ LOGGING
     # ---------------------------
     log_rows = []
     log_every = int(max(1, args.log_every))
 
+    # ---- live viewer init ----
     viewer = None
     if args.view:
         from cear_pilot.training.pygame_viewer import PygameGridViewer
-
         viewer = PygameGridViewer(
             width=args.width,
             height=args.height,
@@ -408,7 +304,7 @@ def main():
 
     # ---- state init
     agent.reset(batch_size=1)
-    last_action = 4  # stay
+    last_action = 4  # stay (assumed)
     g_prev = agent.get_latents()["g"].detach().clone()
 
     # ---- logs / diagnostics
@@ -417,53 +313,46 @@ def main():
     kl_ema = None
     maxpi_ema = None
 
+    # actor baseline + scaling
     b = None
     err_stats = EMAMeanVar(beta=0.99)
 
+    # histograms over the last window (for sanity)
+    window = 2000
     act_hist = np.zeros(n_actions, dtype=np.int64)
     zone_hist = np.zeros(3, dtype=np.int64)
+
+    # extra diagnostics
     logits_norm_ema = None
 
     t0 = time.time()
     episode = 0
     t_in_ep = 0
-    completed_steps = 0
 
     try:
         for step in range(args.steps):
             # ---------- forward
-            x_t = torch.tensor(obs, dtype=torch.float32, device=device).unsqueeze(0)
-            p_t = make_proprio_from_last_action(last_action, n_actions, device=device)
+            x_t = torch.tensor(obs, dtype=torch.float32, device=device).unsqueeze(0)  # (1, obs_dim)
+            p_t = make_proprio_from_last_action(last_action, n_actions, device=device)  # (1, n_actions)
 
             out = agent.forward_step(x_t, p_t, ablate_g=False)
             g_t = out["g"]
             s_t = out["s"]
 
-            # Internal policy logits are used only for the detached prediction mixture.
+            # logits produced internally (often from policy head)
             logits_pred = out["logits"]
 
-            # ------------------------------------------------------------
-            # JOURNAL ABLATION: policy-side gradient routing
-            #
-            # Before warmup ends:
-            #   BOTH conditions use s.detach().
-            #
-            # After warmup:
-            #   default  -> policy(s.detach())
-            #   coupled  -> policy(s)
-            # ------------------------------------------------------------
-            couple_policy_now = bool(
-                args.policy_grad_coupled and step >= warmup_steps
-            )
-            policy_state = s_t if couple_policy_now else s_t.detach()
-            logits_act = agent.policy(policy_state)
+            # ---- STOP-GRAD DEFAULT:
+            # action policy uses detached state -> prevents leakage from actor/policy into representation learning
+            logits_act = agent.policy(s_t.detach())
 
+            # action distribution (learned by actor + entropy only)
             pi_act = torch.softmax(logits_act, dim=-1)
 
-            # Prediction loss never trains policy weights in either condition.
+            # pred mixture policy is detached so pred loss doesn't update policy weights
             pi_pred = torch.softmax(logits_pred, dim=-1).detach()
 
-            # ---------- sample + env step
+            # ---------- sample + env step (must use action logits!)
             a_t = agent.policy.sample_action(logits_act, greedy=False)
             a_int = int(a_t.item())
 
@@ -471,37 +360,36 @@ def main():
             x_next = torch.tensor(obs_next, dtype=torch.float32, device=device).unsqueeze(0)
 
             # ---------- decoder predictions
-            xhat_all = decoder.predict_all_actions(g_t)
-            xhat_exp = torch.sum(pi_pred.unsqueeze(-1) * xhat_all, dim=1)
+            xhat_all = decoder.predict_all_actions(g_t)  # (1, A, obs_dim)
+            xhat_exp = torch.sum(pi_pred.unsqueeze(-1) * xhat_all, dim=1)  # (1, obs_dim)
 
             # ---------- world-model losses
             loss_pred = F.mse_loss(xhat_exp, x_next)
             loss_smooth = torch.mean((g_t - g_prev) ** 2)
 
-            # ---------- entropy
-            entropy = -torch.sum(
-                pi_act * torch.log(pi_act + 1e-9), dim=-1
-            ).mean()
+            # ---------- entropy (computed on action policy)
+            entropy = -torch.sum(pi_act * torch.log(pi_act + 1e-9), dim=-1).mean()
 
-            # ---------- actor loss
-            per_a_err = torch.mean(
-                (xhat_all - x_next.unsqueeze(1)) ** 2, dim=-1
-            ).squeeze(0)
-            e_chosen = per_a_err[a_int]
+            # ---------- actor loss (REINFORCE on chosen-action internal cost)
+            # per-action prediction error (cost signal)
+            per_a_err = torch.mean((xhat_all - x_next.unsqueeze(1)) ** 2, dim=-1).squeeze(0)  # (A,)
+            e_chosen = per_a_err[a_int]  # scalar tensor
 
+            # baseline + normalize
             with torch.no_grad():
                 e_val = float(e_chosen.detach().item())
-                _, s = err_stats.update(e_val)
-
+                m, s = err_stats.update(e_val)
                 if b is None:
                     b = e_val
-
                 if args.actor_b > 0.0:
                     b = float(args.actor_b * b + (1.0 - args.actor_b) * e_val)
-
                 baseline = float(b) if (args.actor_b > 0.0) else 0.0
+
+                # normalized advantage (negative centered error)
                 adv = -(e_val - baseline)
                 adv = adv / (s + 1e-8)
+
+                # clip to avoid rare spikes exploding training
                 adv = float(np.clip(adv, -5.0, 5.0))
 
             logp = F.log_softmax(logits_act, dim=-1)[0, a_int]
@@ -511,14 +399,14 @@ def main():
             phase = "A" if step < warmup_steps else "B"
             w_actor_eff = 0.0 if step < warmup_steps else args.w_actor
 
-            # ---------- adaptive entropy coefficient
+            # ---------- adaptive entropy coefficient eps (tiny, but prevents "sudden collapse")
             with torch.no_grad():
                 H = float(entropy.item())
-                H_target = 1.0
+                H_target = 1.0  # heuristic: keep some diversity for g trajectory richness
                 bump = max(0.0, (H_target - H) / max(H_target, 1e-6))
                 ent_coef = args.w_entropy * (1.0 + 2.0 * bump)
 
-            # ---------- total loss
+            # total loss
             loss_world = loss_pred + args.w_smooth * loss_smooth
             loss = loss_world + w_actor_eff * loss_actor - ent_coef * entropy
 
@@ -528,11 +416,6 @@ def main():
             torch.nn.utils.clip_grad_norm_(params, 1.0)
             opt.step()
 
-            completed_steps = step + 1
-
-            if completed_steps in save_steps:
-                save_training_checkpoint(completed_steps)
-
             # ---------- step state
             g_prev = g_t.detach().clone()
             obs = obs_next
@@ -540,13 +423,14 @@ def main():
 
             # ---------- MINIMAL TRAJ LOGGING
             if args.log_traj and ((step % log_every) == 0):
+                # zone index usually in info; fallback robustly
                 z = info.get("zone", None)
                 if z is None:
                     z = info.get("zone_id", None)
                 if isinstance(z, (int, np.integer)):
                     z = int(z)
                 else:
-                    z = -1
+                    z = -1  # unknown
 
                 with torch.no_grad():
                     g_norm = float(torch.linalg.vector_norm(g_t).item())
@@ -554,19 +438,14 @@ def main():
 
                 log_rows.append({
                     "t_global": int(step),
-                    "completed_steps": int(completed_steps),
                     "episode": int(episode),
                     "t_in_ep": int(t_in_ep),
-                    "phase": str(phase),
-                    "policy_grad_coupled_now": int(couple_policy_now),
                     "zone_id": int(z),
                     "action": int(a_int),
                     "entropy": float(ent_val),
                     "g_norm": float(g_norm),
                     "loss_pred": float(loss_pred.item()),
                     "loss_smooth": float(loss_smooth.item()),
-                    "loss_actor": float(loss_actor.item()),
-                    "loss_total": float(loss.item()),
                 })
 
             # ---------- viewer draw
@@ -604,19 +483,17 @@ def main():
                     kl = 0.0
                 else:
                     kl_t = torch.sum(
-                        pi_act * (
-                            torch.log(pi_act + 1e-9) - torch.log(pi_prev + 1e-9)
-                        ),
+                        pi_act * (torch.log(pi_act + 1e-9) - torch.log(pi_prev + 1e-9)),
                         dim=-1,
                     )
                     kl = float(kl_t.mean().item())
                 pi_prev = pi_act.detach()
 
-                maxpi_ema = maxpi if maxpi_ema is None else 0.98 * maxpi_ema + 0.02 * maxpi
-                kl_ema = kl if kl_ema is None else 0.98 * kl_ema + 0.02 * kl
+                maxpi_ema = maxpi if (maxpi_ema is None) else (0.98 * maxpi_ema + 0.02 * maxpi)
+                kl_ema = kl if (kl_ema is None) else (0.98 * kl_ema + 0.02 * kl)
 
                 ln = float(torch.mean(torch.abs(logits_act)).item())
-                logits_norm_ema = ln if logits_norm_ema is None else 0.98 * logits_norm_ema + 0.02 * ln
+                logits_norm_ema = ln if (logits_norm_ema is None) else (0.98 * logits_norm_ema + 0.02 * ln)
 
             act_hist[a_int] += 1
             z = info.get("zone", None)
@@ -634,9 +511,7 @@ def main():
 
                 with torch.no_grad():
                     e_det = per_a_err.detach().float().cpu().numpy()
-                    e_min = float(e_det.min())
-                    e_max = float(e_det.max())
-                    e_std = float(e_det.std())
+                    e_min, e_max, e_std = float(e_det.min()), float(e_det.max()), float(e_det.std())
 
                 act_prob = (act_hist / max(act_hist.sum(), 1)).tolist()
                 zone_prob = (zone_hist / max(zone_hist.sum(), 1)).tolist()
@@ -644,22 +519,16 @@ def main():
                 act_hist[:] = 0
                 zone_hist[:] = 0
 
-                routing = "coupled" if couple_policy_now else "detached"
-
                 print(
                     f"[{step+1:>7}/{args.steps}] "
-                    f"phase={phase} route={routing} "
-                    f"world={lw:.4f} w_ema={float(ema_world):.4f} "
-                    f"pred={float(loss_pred.item()):.4f} "
+                    f"phase={phase} "
+                    f"world={lw:.4f} w_ema={float(ema_world):.4f} pred={float(loss_pred.item()):.4f} "
                     f"smooth={float(loss_smooth.item()):.4f} | "
-                    f"actor={float(loss_actor.item()):.4f} "
-                    f"b={0.0 if b is None else float(b):.4f} "
-                    f"H={float(entropy.item()):.3f} "
-                    f"maxpi={float(maxpi_ema):.3f} KL={float(kl_ema):.6f} "
+                    f"actor={float(loss_actor.item()):.4f} b={0.0 if b is None else float(b):.4f} "
+                    f"H={float(entropy.item()):.3f} maxpi={float(maxpi_ema):.3f} KL={float(kl_ema):.6f} "
                     f"logits|.|={float(logits_norm_ema):.3f} "
                     f"e[min,max,std]={e_min:.3f},{e_max:.3f},{e_std:.3f} "
-                    f"zone={[round(x, 2) for x in zone_prob]} "
-                    f"act={[round(x, 2) for x in act_prob]} "
+                    f"zone={[round(x, 2) for x in zone_prob]} act={[round(x, 2) for x in act_prob]} "
                     f"(ep={episode}, {dt:.1f}s)"
                 )
                 t0 = time.time()
@@ -681,24 +550,14 @@ def main():
             df.to_parquet(out_parquet, index=False)
             print(f"Saved training trajectory to: {out_parquet}")
         except Exception as e:
-            print(
-                f"[WARN] Parquet failed ({type(e).__name__}: {e}). "
-                "Falling back to CSV."
-            )
+            print(f"[WARN] Parquet failed ({type(e).__name__}: {e}). Falling back to CSV.")
             df.to_csv(out_csv, index=False)
             print(f"Saved training trajectory to: {out_csv}")
 
-    # Convenience final checkpoint. Intermediate checkpoints are the canonical
-    # longitudinal snapshots; ckpt.pt preserves compatibility with old scripts.
-    final_meta = dict(meta)
-    final_meta["checkpoint_step"] = int(completed_steps)
-
     ckpt = {
         "agent_state": agent.state_dict(),
-        "decoder_state": decoder.state_dict(),
-        "optimizer_state": opt.state_dict(),
-        "completed_steps": int(completed_steps),
-        "meta": final_meta,
+        "decoder_state": decoder.state_dict(),   # IMPORTANT: keep for run_collect.py
+        "meta": meta,
     }
     torch.save(ckpt, run_dir / "ckpt.pt")
     print(f"Saved checkpoint to: {run_dir / 'ckpt.pt'}")
