@@ -29,3 +29,8 @@
 [checkpoint] outputs/journal_train/default/seed26/ckpt_step42000.pt
 [  42000/48000] phase=B route=detached world=0.0019 w_ema=0.0027 pred=0.0019 smooth=0.0000 | actor=0.1456 b=0.0032 H=1.467 maxpi=0.461 KL=0.007542 logits|.|=0.400 e[min,max,std]=0.002,0.006,0.002 zone=[0.0, 0.03, 0.97] act=[0.03, 0.02, 0.06, 0.84, 0.05] (ep=175, 35.1s)
 [  44000/48000] phase=B route=detached world=0.0047 w_ema=0.0080 pred=0.0046 smooth=0.0000 | actor=0.1249 b=0.0084 H=1.362 maxpi=0.679 KL=0.016511 logits|.|=0.736 e[min,max,std]=0.004,0.007,0.001 zone=[0.0, 0.03, 0.97] act=[0.05, 0.04, 0.05, 0.8, 0.07] (ep=183, 35.2s)
+[  46000/48000] phase=B route=detached world=0.0009 w_ema=0.0042 pred=0.0009 smooth=0.0000 | actor=0.0222 b=0.0047 H=0.470 maxpi=0.833 KL=0.009984 logits|.|=1.073 e[min,max,std]=0.001,0.005,0.001 zone=[0.0, 0.03, 0.97] act=[0.04, 0.02, 0.04, 0.86, 0.04] (ep=191, 35.1s)
+[checkpoint] outputs/journal_train/default/seed26/ckpt_step48000.pt
+[  48000/48000] phase=B route=detached world=0.0025 w_ema=0.0028 pred=0.0025 smooth=0.0000 | actor=0.0003 b=0.0028 H=0.064 maxpi=0.987 KL=0.000426 logits|.|=2.230 e[min,max,std]=0.002,0.008,0.002 zone=[0.0, 0.02, 0.98] act=[0.01, 0.01, 0.02, 0.95, 0.02] (ep=200, 35.0s)
+Saved training trajectory to: outputs/journal_train/default/seed26/train_traj.parquet
+Saved checkpoint to: outputs/journal_train/default/seed26/ckpt.pt
