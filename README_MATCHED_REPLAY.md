@@ -1,69 +1,96 @@
-# CEAR matched-replay patch
+# CEAR matched replay — full copy bundle (v2)
 
-This bundle implements the controlled 800-step serpentine replay for the journal extension of `perspective-ce`.
+This bundle is intentionally **self-contained**. There is no patcher and no
+requirement to edit the existing `run_collect.py` or `nzone_grid.py`.
 
-## Probe definition
+Copy/extract the bundle directly into the repository root. It adds:
 
-- Grid: 15×9
-- Start directly at `(1, 2)` on reset
-- `g0 = 0` through the existing `agent.reset()`
-- No center burn-in
-- No teleport
-- Fixed external actions
-- Every one-cell displacement is followed by `STAY × 4`
-- One-way ㄹ path:
+```text
+cear_pilot/experiments/run_collect_matched.py
+probes/serpentine_2roundtrip_dwell4.json
+make_serpentine_probe.py
+verify_matched_replay_pair.py
+smoke_test_matched_replay.sh
+collect_matched_replays.sh
+```
 
+## Probe
+
+- 15×9 grid
+- starts directly at `(1,2)`
+- `g0=0`
+- no center burn-in
+- no teleport
+- no learning during replay
+- one-cell move followed by `STAY×4`
+- ㄹ-shaped one-way path:
   `(1,2) -> (13,2) -> (13,4) -> (1,4) -> (1,6) -> (13,6)`
+- exact reverse to `(1,2)`
+- two complete round trips
+- 800 steps
+- 24 zone-boundary crossings
+- `zone_sigma=(0.6, 0.3, 0.05)`
 
-- Exact reverse returns to `(1,2)`
-- Two complete round trips
-- Total: 800 temporal steps
-- Expected zone-boundary crossings: 24
-- Base sigma: `(0.6, 0.3, 0.05)`
-- No regime switch in this matched-clean collection
+`z`, `g`, `s`, and policy outputs continue to evolve normally. Only the
+environment action is externally forced.
 
-The model weights stay frozen. `z`, `g`, `s`, and policy outputs still evolve normally at every step; only the action sent to the environment is externally forced.
+## Install
 
-## Files
+From `/workspace/perspective-ce`, extract/copy the files so the paths above exist.
 
-- `apply_matched_replay_patch.py` — adds `start_xy` reset support and collector CLI support.
-- `make_serpentine_probe.py` — generates and validates the 800-action JSON.
-- `smoke_test_matched_replay.sh` — seed 1 / 48k default-vs-coupled dry run.
-- `verify_matched_replay_pair.py` — confirms identical actions, positions, zones, episode RNG seeds, and `obs_*` streams.
-- `collect_matched_replays.sh` — 30 seeds × 7 checkpoints × default/coupled, 10 episodes each.
-
-## Run
-
-Copy these files into the repository root, then:
+Check:
 
 ```bash
-python apply_matched_replay_patch.py
+python -m cear_pilot.experiments.run_collect_matched --help
+```
+
+No patch command is needed.
+
+The JSON probe is already included. If you ever want to regenerate it:
+
+```bash
 python make_serpentine_probe.py
 ```
 
-After training finishes, run the existing branchpoint verification first:
+## Smoke test
 
-```bash
-python verify_journal_branchpoint.py --seed_start 1 --seed_end 30
-```
-
-Then smoke-test one final checkpoint pair:
+You already ran the branchpoint verification, so go directly to:
 
 ```bash
 DEVICE=cuda bash smoke_test_matched_replay.sh
 ```
 
-You want the final message:
+Expected ending:
 
 ```text
 MATCHED-REPLAY CHECK PASSED
 ```
 
-Only then launch the full matched collection:
+The checker requires default/coupled to have identical:
+
+- episode RNG seeds
+- forced actions
+- positions
+- zones
+- observation streams
+
+It deliberately does **not** require `z/g/s/pi` to match.
+
+## Full collection
+
+After smoke passes:
 
 ```bash
 DEVICE=cuda SEED_START=1 SEED_END=30 bash collect_matched_replays.sh
 ```
+
+Defaults:
+
+- 30 training seeds
+- default + coupled
+- checkpoints 12k, 18k, 24k, 30k, 36k, 42k, 48k
+- 10 independent environment realizations per checkpoint
+- 800 steps per episode
 
 Outputs:
 
@@ -73,11 +100,20 @@ outputs/journal_replay_matched/
   coupled/stepXXXXX/seedN/serpentine_dwell4/
 ```
 
-This patch does **not** modify training, the default/coupled intervention, recurrent `g` detach, the old free-running replay script, or regime-switch semantics.
+## Why a separate collector?
 
-The patcher also writes one-time backups:
+The existing environment hard-codes its reset position at the center, and the
+existing `run_collect.py` has no `--start_xy`. Rather than silently rewriting
+those established files, this bundle adds a dedicated matched-replay collector.
 
-```text
-cear_pilot/envs/nzone_grid.py.pre_matched_replay.bak
-cear_pilot/experiments/run_collect.py.pre_matched_replay.bak
-```
+`run_collect_matched.py` performs the normal environment reset, rewinds the
+environment RNG to the same episode seed, places the agent at `(1,2)`, and only
+then generates the first retained observation. Therefore the default/coupled
+conditions receive the same observation stream without changing the original
+training/free-running code.
+
+For alignment, the output also records both:
+
+- `x/y/zone_id`: post-action position, matching the old collector convention
+- `x_obs/y_obs/zone_obs`: position that generated the observation used to
+  compute the logged `z/g/s`

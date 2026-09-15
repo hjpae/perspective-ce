@@ -7,16 +7,17 @@ STEP="${STEP:-48000}"
 EVAL_SEED="${EVAL_SEED:-0}"
 EPISODES="${EPISODES:-1}"
 
-MAX_STEPS=800
-SIGMA_BASE=(0.6 0.3 0.05)
 TRAIN_ROOT="outputs/journal_train"
 SMOKE_ROOT="outputs/journal_replay_matched_smoke"
 PROBE_JSON="${PROBE_JSON:-probes/serpentine_2roundtrip_dwell4.json}"
+COLLECTOR="cear_pilot.experiments.run_collect_matched"
 
 step_pad=$(printf "%05d" "$STEP")
 
 if [[ ! -f "$PROBE_JSON" ]]; then
-  PYTHONPATH=. python make_serpentine_probe.py --out "$PROBE_JSON"
+  echo "[ERR ] missing probe: $PROBE_JSON"
+  echo "      Run: python make_serpentine_probe.py"
+  exit 1
 fi
 
 run_one() {
@@ -33,15 +34,15 @@ run_one() {
   mkdir -p "$(dirname "$outdir")"
 
   echo "[run ] smoke ${cond}"
-  PYTHONPATH=. python -m cear_pilot.experiments.run_collect \
+  PYTHONPATH=. python -m "$COLLECTOR" \
     --ckpt "$ckpt" \
+    --replay_actions "$PROBE_JSON" \
     --episodes "$EPISODES" \
     --seed "$EVAL_SEED" \
     --device "$DEVICE" \
-    --max_steps "$MAX_STEPS" \
+    --max_steps 800 \
     --start_xy 1 2 \
-    --zone_sigma "${SIGMA_BASE[@]}" \
-    --replay_actions "$PROBE_JSON" \
+    --zone_sigma 0.6 0.3 0.05 \
     --outdir "$outdir"
 }
 
@@ -50,10 +51,9 @@ run_one coupled
 
 A="${SMOKE_ROOT}/default/step${step_pad}/seed${SEED}/serpentine_dwell4"
 B="${SMOKE_ROOT}/coupled/step${step_pad}/seed${SEED}/serpentine_dwell4"
-EXPECTED_ROWS=$((EPISODES * MAX_STEPS))
 
 echo
-PYTHONPATH=. python verify_matched_replay_pair.py "$A" "$B" --expected_rows "$EXPECTED_ROWS"
-
-echo
-echo "Smoke test complete."
+PYTHONPATH=. python verify_matched_replay_pair.py \
+  "$A" "$B" \
+  --expected_steps 800 \
+  --expected_episodes "$EPISODES"
