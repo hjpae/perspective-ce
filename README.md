@@ -24,7 +24,7 @@ Clone the repository:
 
 ```bash
 git clone git@github.com:hjpae/perspective-ce.git
-cd perspective-cemergence
+cd perspective-ce
 git remote -v
 ```
 
@@ -42,7 +42,7 @@ Create the conda environment:
 
 ```bash
 conda env create -f environment.yml
-conda activate cear-ce
+conda activate cear-cemergence
 ```
 
 Install PyTorch separately if needed:  
