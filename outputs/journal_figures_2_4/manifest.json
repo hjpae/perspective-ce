@@ -1,0 +1,17 @@
+{
+  "analysis_window": "full 800-step matched serpentine trajectory; no cutoff",
+  "conditions": [
+    "default step0",
+    "default step48000",
+    "coupled step48000"
+  ],
+  "n_training_seeds": 30,
+  "episodes_per_seed": 10,
+  "steps_per_episode": 800,
+  "seed_summary": "median across 10 episodes",
+  "group_summary": "median across 30 training seeds",
+  "uncertainty": "percentile seed bootstrap, B=10000",
+  "ar1_surrogates_per_episode": 5,
+  "ar1_definition": "independent per-dimension Gaussian AR(1); empirical mean and SD matched exactly after simulation; empirical lag-1 autocorrelation targeted per dimension; cross-dimensional coupling removed",
+  "phi_pipeline_reused_from": "cear_pilot.analysis.phi.analyze_stopgrad_matched"
+}
