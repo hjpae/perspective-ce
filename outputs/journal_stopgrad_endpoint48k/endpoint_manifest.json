@@ -1,0 +1,17 @@
+{
+  "endpoint_step": 48000,
+  "n_training_seeds": 30,
+  "episodes_per_seed": 10,
+  "steps_per_episode": 800,
+  "primary_effect": "paired coupled - default at 48k",
+  "bootstrap_unit": "training seed",
+  "bootstrap_n": 10000,
+  "bootstrap_ci": "percentile 95%",
+  "downward_decomposition": {
+    "whole_to_single_sum": "whole_to_part0 + whole_to_part1; orientation invariant",
+    "whole_to_parts": "whole_to_parts atom",
+    "max_reconstruction_error": 8.881784197001252e-16
+  },
+  "shared_partition_robustness": true,
+  "shared_partition_definition": "pair-specific Fiedler partition from mean(default MI, coupled MI), then held fixed across the matched pair"
+}

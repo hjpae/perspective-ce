@@ -1,0 +1,16 @@
+MATCHED INPUT VALIDATION
+======================================================================
+Expected episode pairs : 2100
+Found episode pairs    : 2100
+Missing pairs          : 0
+External mismatches    : 0
+
+PASS: every default/coupled pair received identical external history.
+
+12k BRANCHPOINT VALIDATION
+======================================================================
+phi_r_g                        max |difference| = 0 PASS
+group_decoupling_g             max |difference| = 0 PASS
+group_downward_g               max |difference| = 0 PASS
+group_part_driven_g            max |difference| = 0 PASS
+phi_r_z                        max |difference| = 0 PASS

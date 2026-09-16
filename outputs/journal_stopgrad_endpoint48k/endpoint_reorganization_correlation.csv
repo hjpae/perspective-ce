@@ -1,0 +1,2 @@
+x_metric,y_metric,spearman_rho,ci95_low,ci95_high,spearman_p,n_seeds,valid_bootstrap_samples
+group_decoupling_g,group_downward_g,-0.7490545050055617,-0.9238564377185682,-0.4294596049297582,1.9169956345358683e-06,30,10000
