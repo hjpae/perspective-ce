@@ -1,0 +1,14 @@
+{
+  "style_basis": "legacy paper figure style (scatter-left + half-violin-right raincloud)",
+  "summary_marker": "median + percentile-bootstrap 95% CI over training seeds",
+  "palette": {
+    "trained": "#1f4e79",
+    "untrained": "#d65f3e",
+    "coupled": "#b64e5a",
+    "neutral": "#444444",
+    "shuffle": "#6f8f5f",
+    "ar1": "#b74d4d"
+  },
+  "backend": "cear_pilot.analysis.phi.journal_figures_2_4_matched",
+  "backend_window": "full 800-step matched serpentine trajectory; no cutoff"
+}
